@@ -6,27 +6,23 @@ const { enviarOrdemCompraReal } = require('./services/enviarOrdem');
 const app = express();
 const port = process.env.PORT || 8080;
 
-let accessToken;
+let accessToken = '';
+let refreshToken = '';
 
-// Route to initiate Tiny OAuth2 authorization
 app.get('/auth', (req, res) => {
-  console.log('🔍 /auth route hit');
   const clientId = process.env.CLIENT_ID;
   const redirectUri = process.env.REDIRECT_URI;
-  const authUrl = `https://tiny.one/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  const authUrl = \`https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?response_type=code&client_id=\${clientId}&redirect_uri=\${encodeURIComponent(redirectUri)}&scope=openid\`;
   res.redirect(authUrl);
 });
 
-// Callback route to exchange code for an access token
 app.get('/callback', async (req, res) => {
-  console.log('🔍 /callback route hit');
   const code = req.query.code;
-  if (!code) {
-    return res.status(400).send('Missing code');
-  }
+  if (!code) return res.status(400).send('Missing code');
+
   try {
-    const tokenResponse = await axios.post(
-      'https://oauth2.tiny.com.br/token',
+    const response = await axios.post(
+      'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
       new URLSearchParams({
         grant_type: 'authorization_code',
         code,
@@ -34,34 +30,32 @@ app.get('/callback', async (req, res) => {
         client_secret: process.env.CLIENT_SECRET,
         redirect_uri: process.env.REDIRECT_URI,
       }),
-      {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      }
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     );
-    accessToken = tokenResponse.data.access_token;
-    console.log('✅ Tiny access token stored');
-    res.send(`Tiny auth code received: ${code}`);
+
+    accessToken = response.data.access_token;
+    refreshToken = response.data.refresh_token;
+
+    console.log('✅ accessToken armazenado');
+    res.send(`Autorizado com sucesso. Código recebido: ${code}`);
   } catch (error) {
-    console.error('Error fetching access token', error.response?.data || error);
-    res.status(500).send('Error fetching access token');
+    console.error('Erro ao buscar token:', error.response?.data || error.message);
+    res.status(500).send('Erro ao buscar token');
   }
 });
 
-// Route to send purchase order to Tiny
 app.get('/enviar-oc', async (req, res) => {
-  console.log('🔍 /enviar-oc route hit');
-  if (!accessToken) {
-    return res.status(401).send('No access token. Call /auth first.');
-  }
+  if (!accessToken) return res.status(401).send('Token ausente. Faça login em /auth.');
+
   try {
-    const result = await enviarOrdemCompraReal(accessToken);
-    res.json({ sucesso: true, tiny: result });
-  } catch (error) {
-    console.error('Error sending order', error.response?.data || error.message);
-    res.status(500).json({ sucesso: false, erro: error.message });
+    const resultado = await enviarOrdemCompraReal(accessToken);
+    res.json({ sucesso: true, resposta: resultado });
+  } catch (err) {
+    console.error('Erro ao enviar OC:', err.response?.data || err.message);
+    res.status(500).send('Erro ao enviar OC');
   }
 });
 
 app.listen(port, () => {
-  console.log(`🚀 Server running on port ${port}`);
+  console.log(`🚀 Servidor rodando na porta ${port}`);
 });

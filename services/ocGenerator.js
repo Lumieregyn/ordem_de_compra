@@ -1,5 +1,5 @@
 function gerarOrdemCompra() {
-  const xml = `
+  const xml = \`
 <pedido>
   <dados>
     <pedido>
@@ -20,7 +20,9 @@ function gerarOrdemCompra() {
       <total>400</total>
     </pedido>
   </dados>
-</pedido>`;
+</pedido>
+  \`.trim();
+
   return xml;
 }
 
