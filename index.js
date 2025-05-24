@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const { enviarOrdemCompraReal } = require('./services/enviaOrdem');
+const { enviarOrdemCompraReal } = require('./services/enviarOrdem');
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -13,7 +13,7 @@ app.get('/auth', (req, res) => {
   console.log('🔍 /auth route hit');
   const clientId = process.env.CLIENT_ID;
   const redirectUri = process.env.REDIRECT_URI;
-  const authUrl = `https://api.tiny.com.br/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  const authUrl = `https://oauth2.tiny.com.br/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
   res.redirect(authUrl);
 });
 
@@ -26,7 +26,7 @@ app.get('/callback', async (req, res) => {
   }
   try {
     const tokenResponse = await axios.post(
-      'https://api.tiny.com.br/oauth2/token',
+      'https://oauth2.tiny.com.br/token',
       new URLSearchParams({
         grant_type: 'authorization_code',
         code,

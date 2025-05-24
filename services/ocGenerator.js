@@ -1,10 +1,4 @@
-/**
- * Gera o XML para envio de uma ordem de compra ao Tiny API.
- * Ajuste os campos conforme a documentação do Tiny.
- */
-
 function gerarOrdemCompra() {
-  // Exemplo simples de estrutura de XML para pedido de compra
   const xml = `
 <pedido>
   <dados>
@@ -26,9 +20,7 @@ function gerarOrdemCompra() {
       <total>400</total>
     </pedido>
   </dados>
-</pedido>
-  `.trim();
-
+</pedido>`;
   return xml;
 }
 
