@@ -2,7 +2,7 @@ const pedido = require('../mock/pedido_aprovado.json');
 
 function gerarOrdemCompra() {
     const itensNecessarios = pedido.itens.filter(item => item.sku.toUpperCase().includes('PEDIDO'));
-    const ordemCompra = {
+    return {
         numeroPedido: pedido.numero,
         data: new Date().toISOString().split('T')[0],
         itens: itensNecessarios.map(item => ({
@@ -12,7 +12,6 @@ function gerarOrdemCompra() {
         })),
         observacoes: pedido.observacoes
     };
-    return ordemCompra;
 }
 
 module.exports = { gerarOrdemCompra };

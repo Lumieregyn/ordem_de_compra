@@ -1,20 +1,19 @@
-# Ordem de Compra Inteligente - Backend (Etapa 1)
+# Ordem de Compra Inteligente - Backend (Etapa 2)
 
-Este projeto simula a lógica de detecção de produtos sob encomenda com base no SKU que contém "PEDIDO".
+Esta etapa inclui a integração com o OAuth2 da API Tiny v3.
 
-## Como rodar
+## Rotas disponíveis
 
-1. Instale as dependências:
-```
-npm install
-```
+- `/auth`: redireciona para autenticação com o Tiny
+- `/callback`: recebe o token de acesso
+- `/gerar-oc`: simula geração da OC com token
 
-2. Inicie o servidor:
-```
-npm start
-```
+## Como usar no Railway
 
-3. Acesse:
-```
-http://localhost:3000/gerar-oc
-```
+1. Adicione as variáveis de ambiente:
+- `CLIENT_ID`
+- `CLIENT_SECRET`
+- `REDIRECT_URI`
+
+2. Acesse `/auth` para iniciar o fluxo
+3. Após o callback, acesse `/gerar-oc`
