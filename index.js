@@ -19,7 +19,7 @@ app.get('/auth', (req, res) => {
             .send("❌ Variáveis de ambiente CLIENT_ID ou REDIRECT_URI estão ausentes.");
     }
 
-    const authUrl = \`https://api.tiny.com.br/oauth2/authorize?response_type=code&client_id=\${clientId}&redirect_uri=\${encodeURIComponent(redirectUri)}\`;
+    const authUrl = `https://api.tiny.com.br/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
     res.redirect(authUrl);
 });
 
@@ -69,7 +69,8 @@ app.get('/gerar-oc', (req, res) => {
     res.json(oc);
 });
 
+// Porta dinâmica para Railway
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(\`🚀 Servidor rodando na porta \${PORT}\`);
+    console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
