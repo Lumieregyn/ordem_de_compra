@@ -1,4 +1,3 @@
-// index.js
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
@@ -63,7 +62,6 @@ app.get('/callback', async (req, res) => {
 app.get('/enviar-oc', async (req, res) => {
   console.log('🔍 /enviar-oc route hit');
   try {
-    // Exemplo de payload de pedido já aprovado
     const pedido = require('./pedido_aprovado.json');
     const oc = ocGenerator.generateOC(pedido);
     return res.json(oc);

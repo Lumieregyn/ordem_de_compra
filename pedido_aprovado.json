@@ -1,7 +1,14 @@
 {
-  "id": "12345",
   "items": [
-    { "sku": "PROD001", "description": "Produto A", "quantity": 2, "price": 50 },
-    { "sku": "PROD002", "description": "Produto B", "quantity": 1, "price": 100 }
+    {
+      "sku": "ITEM1",
+      "quantity": 2,
+      "price": 100
+    },
+    {
+      "sku": "ITEM2",
+      "quantity": 1,
+      "price": 200
+    }
   ]
 }
