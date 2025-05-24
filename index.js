@@ -9,13 +9,15 @@ const port = process.env.PORT || 8080;
 let accessToken = '';
 let refreshToken = '';
 
+// Rota de autorização
 app.get('/auth', (req, res) => {
   const clientId = process.env.CLIENT_ID;
   const redirectUri = process.env.REDIRECT_URI;
-  const authUrl = \`https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?response_type=code&client_id=\${clientId}&redirect_uri=\${encodeURIComponent(redirectUri)}&scope=openid\`;
+  const authUrl = `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid`;
   res.redirect(authUrl);
 });
 
+// Rota de callback após autorização
 app.get('/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send('Missing code');
@@ -36,7 +38,7 @@ app.get('/callback', async (req, res) => {
     accessToken = response.data.access_token;
     refreshToken = response.data.refresh_token;
 
-    console.log('✅ accessToken armazenado');
+    console.log('✅ Token armazenado com sucesso');
     res.send(`Autorizado com sucesso. Código recebido: ${code}`);
   } catch (error) {
     console.error('Erro ao buscar token:', error.response?.data || error.message);
@@ -44,6 +46,7 @@ app.get('/callback', async (req, res) => {
   }
 });
 
+// Rota para enviar OC usando token obtido
 app.get('/enviar-oc', async (req, res) => {
   if (!accessToken) return res.status(401).send('Token ausente. Faça login em /auth.');
 
