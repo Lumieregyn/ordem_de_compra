@@ -1,26 +1,28 @@
-# Ordem de Compra Integration
+# Integração Tiny API V3 - Ordem de Compra
 
-## Setup
+Este projeto implementa a integração com a API V3 do Tiny ERP para geração e envio de ordem de compra.
 
-1. Renomeie `.env` e preencha suas credenciais Tiny:
-   - CLIENT_ID
-   - CLIENT_SECRET
-   - REDIRECT_URI
+## Configuração
+
+1. Renomeie `.env.example` para `.env` e preencha:
+   ```
+   CLIENT_ID=...
+   CLIENT_SECRET=...
+   REDIRECT_URI=https://your-domain.up.railway.app/callback
+   ```
 
 2. Instale dependências:
-
-   ```bash
+   ```
    npm install
    ```
 
-3. Inicie o servidor:
-
-   ```bash
+3. Execute a aplicação:
+   ```
    npm start
    ```
 
 ## Endpoints
 
-- **GET /auth**: inicia o fluxo OAuth2 (redireciona ao Tiny).
-- **GET /callback?code=**: recebe o código, troca por token de acesso.
-- **GET /enviar-oc**: gera e envia a ordem de compra em XML (necessita token).
+- **GET /auth**: inicia fluxo OAuth2 no Tiny.
+- **GET /callback?code=**: recebe código, troca por token e envia ordem de compra.
+- **GET /enviar-oc**: instrução de uso do fluxo.

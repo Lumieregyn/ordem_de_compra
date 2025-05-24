@@ -1,16 +1,16 @@
 const axios = require('axios');
 
-async function enviarOrdem(xml, token) {
+async function enviarOrdemCompra(xml, token) {
   return axios.post(
-    'https://api.tiny.com.br/api2/pedido.compra.xml',
-    new URLSearchParams({ xml }),
+    'https://erp.tiny.com.br/public-api/v3/purchase-order',
+    xml,
     {
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Type': 'application/xml',
         'Authorization': `Bearer ${token}`
       }
     }
   );
 }
 
-module.exports = enviarOrdem;
+module.exports = { enviarOrdemCompra };
