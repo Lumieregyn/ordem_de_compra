@@ -17,8 +17,8 @@ app.get('/auth', (req, res) => {
         return res.status(500).send("❌ Variáveis CLIENT_ID ou REDIRECT_URI ausentes.");
     }
 
-    const authUrl = \`https://api.tiny.com.br/oauth2/authorize?response_type=code&client_id=\${clientId}&redirect_uri=\${encodeURIComponent(redirectUri)}\`;
-    res.redirect(authUrl);
+   const authUrl = `https://api.tiny.com.br/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+
 });
 
 app.get('/callback', async (req, res) => {
