@@ -1,111 +1,75 @@
-// index.js
-
-// 1) Carrega variáveis de ambiente de um .env
 require('dotenv').config();
-
 const express = require('express');
 const axios = require('axios');
-const path = require('path');
-const ocGenerator = require('./services/ocGenerator');
+const { gerarOrdemCompra } = require('./services/ocGenerator');
 
 const app = express();
 const port = process.env.PORT || 8080;
 
-// As credenciais devem vir como SERVICE VARIABLES no Railway:
-// CLIENT_ID, CLIENT_SECRET e REDIRECT_URI
+// Tiny OAuth2 credentials
 const clientId = process.env.CLIENT_ID;
 const clientSecret = process.env.CLIENT_SECRET;
 const redirectUri = process.env.REDIRECT_URI;
 
-// Rota de login no Tiny (inicia o OAuth2)
+let accessToken = null;
+
+// Start OAuth2 flow
 app.get('/auth', (req, res) => {
   console.log('🔍 /auth route hit');
-
-  const authUrl = `https://api.tiny.com.br/oauth2/authorize` +
-    `?response_type=code` +
-    `&client_id=${encodeURIComponent(clientId)}` +
-    `&redirect_uri=${encodeURIComponent(redirectUri)}`;
-
-  // redireciona o usuário para o Tiny
+  if (!clientId || !redirectUri) {
+    return res.status(500).send('Missing CLIENT_ID or REDIRECT_URI');
+  }
+  const authUrl = `https://api.tiny.com.br/oauth2/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}`;
   res.redirect(authUrl);
 });
 
-// Callback do Tiny após login/autorização
+// OAuth2 callback
 app.get('/callback', async (req, res) => {
   console.log('🔍 /callback route hit');
-  const { code } = req.query;
-
-  if (!code) {
-    return res.status(400).send('Parâmetro "code" ausente.');
-  }
-
+  const code = req.query.code;
+  if (!code) return res.status(400).send('Missing code');
   try {
-    // troca código por token de acesso
-    const tokenResponse = await axios.post(
-      'https://api.tiny.com.br/oauth2/token',
-      null,
-      {
-        params: {
-          grant_type: 'authorization_code',
-          client_id: clientId,
-          client_secret: clientSecret,
-          redirect_uri: redirectUri,
-          code,
-        },
+    const response = await axios.post('https://api.tiny.com.br/oauth2/token', null, {
+      params: {
+        grant_type: 'authorization_code',
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        redirect_uri: redirectUri
       }
-    );
-
-    const accessToken = tokenResponse.data.access_token;
-    console.log('✅ Access Token recebido:', accessToken);
-
-    // TODO: armazene accessToken em algum lugar seguro (DB, Redis, etc.)
-    // por simplicidade aqui retornamos apenas o código
-    res.send(`Código recebido do Tiny: ${code}`);
+    });
+    accessToken = response.data.access_token;
+    console.log('✅ Access token obtained:', accessToken);
+    res.send('✅ Access token obtained');
   } catch (err) {
-    console.error('❌ Erro ao trocar código por token:', err.response?.data || err.message);
-    res.status(500).send('Erro interno ao obter token do Tiny.');
+    console.error('❌ Error fetching token:', err.response?.data || err.message);
+    res.status(500).send('Error fetching token');
   }
 });
 
-// Gera a Ordem de Compra e envia para o Tiny
+// Generate and send purchase order
 app.get('/enviar-oc', async (req, res) => {
   console.log('🔍 /enviar-oc route hit');
-
+  if (!accessToken) return res.status(401).send('No access token. Call /auth first.');
+  const pedido = require('./pedido_aprovado.json');
+  const xmlPayload = gerarOrdemCompra(pedido);
   try {
-    // Carrega o JSON de pedido aprovado (exemplo em root: pedido_aprovado.json)
-    const pedido = require(path.join(__dirname, 'pedido_aprovado.json'));
-
-    // Gera o XML ou JSON da OC conforme Tiny espera
-    const oc = ocGenerator.generateOrder(pedido);
-
-    // Envia para a API do Tiny (exemplo de endpoint fictício)
-    // Substitua pelos parâmetros corretos da API que estiver usando
-    const tinyResponse = await axios.post(
-      'https://api.tiny.com.br/api2/produto.incluir',
-      null,
-      {
-        params: {
-          token: process.env.ACCESS_TOKEN, // você deve obter e armazenar esse token no /callback
-          xml: oc,
-          json: true,
-        },
+    const result = await axios.post('https://api.tiny.com.br/api2/ordem.compra.incluir.php', null, {
+      params: {
+        token: accessToken,
+        xml: xmlPayload,
+        formato: 'json'
       }
-    );
-
-    console.log('✅ Tiny respondeu:', tinyResponse.data);
-    return res.json({ sucesso: true, tiny: tinyResponse.data });
+    });
+    console.log('✅ Tiny API response:', result.data);
+    res.json({ success: true, data: result.data });
   } catch (err) {
-    console.error('❌ Erro ao enviar OC:', err.response?.data || err.message);
-    return res.status(500).send('Erro ao enviar Ordem de Compra.');
+    console.error('❌ Error sending order:', err.response?.data || err.message);
+    res.status(500).send('Error sending order');
   }
 });
 
-// Qualquer outra rota cai aqui
-app.use((req, res) => {
-  res.status(404).send(`Não é possível obter ${req.path}`);
-});
+// 404 handler
+app.use((req, res) => res.status(404).send(`Cannot GET ${req.path}`));
 
-// Inicia o servidor
-app.listen(port, () => {
-  console.log(`🚀 Servidor rodando na porta ${port}`);
-});
+app.listen(port, () => console.log(`🚀 Server running on port ${port}`));

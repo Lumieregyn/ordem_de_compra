@@ -1,9 +1,19 @@
-module.exports = { gerarOrdemCompra };
+function gerarOrdemCompra(pedido) {
+  // Build XML payload for Tiny ERP v2
+  let xml = '<?xml version="1.0" encoding="UTF-8"?><pedido>';
+  xml += `<numero>${pedido.numero || ''}</numero>`;
+  xml += '<itens>';
+  (pedido.itens || []).forEach(item => {
+    if (item.sku.toUpperCase().includes('PEDIDO')) {
+      xml += '<item>';
+      xml += `<codigo>${item.sku}</codigo>`;
+      xml += `<quantidade>${item.quantidade}</quantidade>`;
+      xml += `<valor_unitario>${item.valor_unitario || item.preco || 0}</valor_unitario>`;
+      xml += '</item>';
+    }
+  });
+  xml += '</itens></pedido>';
+  return xml;
+}
 
-// services/ocGenerator.js
-exports.generateOrder = (pedido) => {
-  // monte o XML ou JSON que o Tiny espera
-  // ex.: `<order><id>${pedido.id}</id>...</order>`
-  // ou retorne JSON puro, se a API aceitar.
-  return `<order><id>${pedido.id}</id>...</order>`;
-};
+module.exports = { gerarOrdemCompra };
