@@ -9,21 +9,23 @@ const port = process.env.PORT || 8080;
 let accessToken = '';
 let refreshToken = '';
 
-// Rota de autorização
 app.get('/auth', (req, res) => {
   const clientId = process.env.CLIENT_ID;
   const redirectUri = process.env.REDIRECT_URI;
-  const authUrl = `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid`;
+  const authUrl =
+    'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth' +
+    `?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid`;
   res.redirect(authUrl);
 });
 
-// Rota de callback após autorização
 app.get('/callback', async (req, res) => {
   const code = req.query.code;
-  if (!code) return res.status(400).send('Missing code');
+  if (!code) {
+    return res.status(400).send('Missing code');
+  }
 
   try {
-    const response = await axios.post(
+    const tokenResponse = await axios.post(
       'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
       new URLSearchParams({
         grant_type: 'authorization_code',
@@ -32,11 +34,13 @@ app.get('/callback', async (req, res) => {
         client_secret: process.env.CLIENT_SECRET,
         redirect_uri: process.env.REDIRECT_URI,
       }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      }
     );
 
-    accessToken = response.data.access_token;
-    refreshToken = response.data.refresh_token;
+    accessToken = tokenResponse.data.access_token;
+    refreshToken = tokenResponse.data.refresh_token;
 
     console.log('✅ Token armazenado com sucesso');
     res.send(`Autorizado com sucesso. Código recebido: ${code}`);
@@ -46,9 +50,10 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// Rota para enviar OC usando token obtido
 app.get('/enviar-oc', async (req, res) => {
-  if (!accessToken) return res.status(401).send('Token ausente. Faça login em /auth.');
+  if (!accessToken) {
+    return res.status(401).send('Token ausente. Faça login em /auth.');
+  }
 
   try {
     const resultado = await enviarOrdemCompraReal(accessToken);
