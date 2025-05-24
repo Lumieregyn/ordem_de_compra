@@ -63,15 +63,15 @@ app.get('/enviar-oc', async (req, res) => {
     return res.status(401).send('No access token. Call /auth first.');
   }
 
-  try {
-    const xml = gerarOrdemCompra();
-    const resposta = await enviarOrdemCompra(accessToken, xml);
-    res.send(resposta);
-  } catch (err) {
-    console.error('❌ Erro no envio da OC:', err.response?.data || err.message);
-    res.status(500).send('Erro ao enviar ordem de compra.');
+  const resultado = await enviarOrdemCompra(accessToken);
+
+  if (resultado.success) {
+    res.send('Ordem de compra enviada com sucesso!');
+  } else {
+    res.status(500).send('Erro ao enviar ordem de compra: ' + resultado.error);
   }
 });
+
 
 app.listen(port, () => {
   console.log(`🚀 Servidor rodando na porta ${port}`);
