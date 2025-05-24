@@ -1,3 +1,5 @@
+module.exports = { gerarOrdemCompra };
+
 // services/ocGenerator.js
 exports.generateOrder = (pedido) => {
   // monte o XML ou JSON que o Tiny espera
