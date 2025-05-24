@@ -1,0 +1,18 @@
+{
+  "ordem": {
+    "id": "OC-1748106379697",
+    "itens": [
+      {
+        "sku": "ITEM1",
+        "quantidade": 2,
+        "preco": 100
+      },
+      {
+        "sku": "ITEM2",
+        "quantidade": 1,
+        "preco": 200
+      }
+    ],
+    "total": 400
+  }
+}

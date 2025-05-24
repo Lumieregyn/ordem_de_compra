@@ -1,0 +1,12 @@
+{
+  "numero": "12964",
+  "cliente": "Ricardo Vantini",
+  "data": "2025-05-22",
+  "observacoes": "DISPONIBILIDADE EM MÉDIA DE 20 DIAS ÚTEIS",
+  "itens": [
+    { "sku": "PEDIDO NORD 720 8", "nome": "Fonte DC12V 2A 24W", "quantidade": 17 },
+    { "sku": "PEDIDO NORD-723 2", "nome": "Sensor Porta 2m", "quantidade": 10 },
+    { "sku": "PEDIDO NORD 723 3", "nome": "Sensor 2 Portas 2m", "quantidade": 7 },
+    { "sku": "ConectorFTLED", "nome": "Conector Fita Led", "quantidade": 20 }
+  ]
+}
