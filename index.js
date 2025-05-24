@@ -14,9 +14,7 @@ app.get('/auth', (req, res) => {
     console.log("📦 Env vars:", { clientId, redirectUri });
 
     if (!clientId || !redirectUri) {
-        return res
-            .status(500)
-            .send("❌ Variáveis de ambiente CLIENT_ID ou REDIRECT_URI estão ausentes.");
+        return res.status(500).send("❌ Variáveis de ambiente CLIENT_ID ou REDIRECT_URI estão ausentes.");
     }
 
     const authUrl = `https://api.tiny.com.br/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
@@ -56,13 +54,11 @@ app.get('/callback', async (req, res) => {
     }
 });
 
-// Rota para gerar OC mock
+// Rota para gerar OC simulada
 app.get('/gerar-oc', (req, res) => {
     console.log("📦 Requisição em /gerar-oc");
     if (!accessToken) {
-        return res
-            .status(401)
-            .send('❌ Token de acesso não disponível. Acesse /auth primeiro.');
+        return res.status(401).send('❌ Token de acesso não disponível. Acesse /auth primeiro.');
     }
     const oc = gerarOrdemCompra();
     oc.token = accessToken;
