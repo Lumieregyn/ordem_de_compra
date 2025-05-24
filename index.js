@@ -12,9 +12,7 @@ let refreshToken = '';
 app.get('/auth', (req, res) => {
   const clientId = process.env.CLIENT_ID;
   const redirectUri = process.env.REDIRECT_URI;
-  const authUrl =
-    'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth' +
-    `?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid`;
+  const authUrl = `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid`;
   res.redirect(authUrl);
 });
 
