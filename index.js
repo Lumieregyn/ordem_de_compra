@@ -1,75 +1,81 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
+const { parseStringPromise } = require('xml2js');
 const { gerarOrdemCompra } = require('./services/ocGenerator');
 
 const app = express();
 const port = process.env.PORT || 8080;
 
-// Tiny OAuth2 credentials
+// Environment variables
 const clientId = process.env.CLIENT_ID;
 const clientSecret = process.env.CLIENT_SECRET;
 const redirectUri = process.env.REDIRECT_URI;
 
 let accessToken = null;
 
-// Start OAuth2 flow
+app.get('/', (req, res) => {
+  res.send('Ordem de Compra Backend');
+});
+
+// Route to initiate OAuth2 authorization
 app.get('/auth', (req, res) => {
-  console.log('🔍 /auth route hit');
-  if (!clientId || !redirectUri) {
-    return res.status(500).send('Missing CLIENT_ID or REDIRECT_URI');
-  }
-  const authUrl = `https://api.tiny.com.br/oauth2/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  const authUrl = `https://api.tiny.com.br/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
   res.redirect(authUrl);
 });
 
-// OAuth2 callback
+// Callback route to receive authorization code and exchange for access token
 app.get('/callback', async (req, res) => {
-  console.log('🔍 /callback route hit');
-  const code = req.query.code;
-  if (!code) return res.status(400).send('Missing code');
+  const { code } = req.query;
+  if (!code) {
+    return res.status(400).send('Authorization code missing');
+  }
   try {
-    const response = await axios.post('https://api.tiny.com.br/oauth2/token', null, {
+    const tokenResponse = await axios.post('https://api.tiny.com.br/oauth2/token', null, {
       params: {
         grant_type: 'authorization_code',
         client_id: clientId,
         client_secret: clientSecret,
         code,
-        redirect_uri: redirectUri
-      }
+        redirect_uri: redirectUri,
+      },
     });
-    accessToken = response.data.access_token;
-    console.log('✅ Access token obtained:', accessToken);
-    res.send('✅ Access token obtained');
-  } catch (err) {
-    console.error('❌ Error fetching token:', err.response?.data || err.message);
-    res.status(500).send('Error fetching token');
+    accessToken = tokenResponse.data.access_token;
+    res.send(`Código recebido do Tiny: ${code}`);
+  } catch (error) {
+    console.error('Error obtaining access token:', error.response?.data || error.message);
+    res.status(500).send('Erro ao obter token');
   }
 });
 
-// Generate and send purchase order
+// Route to send purchase order to Tiny
 app.get('/enviar-oc', async (req, res) => {
-  console.log('🔍 /enviar-oc route hit');
-  if (!accessToken) return res.status(401).send('No access token. Call /auth first.');
-  const pedido = require('./pedido_aprovado.json');
-  const xmlPayload = gerarOrdemCompra(pedido);
+  if (!accessToken) {
+    return res.status(401).send('No access token. Call /auth first.');
+  }
   try {
-    const result = await axios.post('https://api.tiny.com.br/api2/ordem.compra.incluir.php', null, {
-      params: {
-        token: accessToken,
-        xml: xmlPayload,
-        formato: 'json'
+    const xmlBody = gerarOrdemCompra();
+    const tinyResponse = await axios.post(
+      'https://api.tiny.com.br/api2/Pedido.adicionar',
+      xmlBody,
+      {
+        headers: {
+          'Content-Type': 'application/xml',
+          Authorization: `Bearer ${accessToken}`,
+        },
       }
-    });
-    console.log('✅ Tiny API response:', result.data);
-    res.json({ success: true, data: result.data });
-  } catch (err) {
-    console.error('❌ Error sending order:', err.response?.data || err.message);
-    res.status(500).send('Error sending order');
+    );
+    // Parse XML response to JSON
+    const parsed = await parseStringPromise(tinyResponse.data);
+    res.json({ sucesso: true, tiny: parsed });
+  } catch (error) {
+    console.error('Error sending order:', error.response?.data || error.message);
+    res.status(500).json({ sucesso: false, error: error.message });
   }
 });
 
-// 404 handler
-app.use((req, res) => res.status(404).send(`Cannot GET ${req.path}`));
-
-app.listen(port, () => console.log(`🚀 Server running on port ${port}`));
+app.listen(port, () => {
+  console.log(`🚀 Server running on port ${port}`);
+  console.log('🔍 /auth route hit to authorize');
+  console.log('🔍 /enviar-oc route hit to send purchase order');
+});
