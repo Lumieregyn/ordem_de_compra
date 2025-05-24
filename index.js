@@ -13,7 +13,7 @@ app.get('/auth', (req, res) => {
   console.log('🔍 /auth route hit');
   const clientId = process.env.CLIENT_ID;
   const redirectUri = process.env.REDIRECT_URI;
-  const authUrl = `https://oauth2.tiny.com.br/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  const authUrl = `https://tiny.one/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
   res.redirect(authUrl);
 });
 
