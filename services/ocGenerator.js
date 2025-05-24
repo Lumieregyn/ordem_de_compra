@@ -1,12 +1,11 @@
-function gerarOrdemCompra() {
-    return {
-        fornecedor: "Fornecedor Exemplo",
-        produtos: [
-            { sku: "PEDIDO-NORD-56390", quantidade: 2 },
-            { sku: "PEDIDO-NORD-88888", quantidade: 1 }
-        ],
-        prazo: "10 dias úteis"
-    };
+function generateOC(pedido) {
+  // Exemplo simples de geração de ordem de compra
+  return {
+    orderId: `OC-\${pedido.id}`,
+    date: new Date().toISOString(),
+    items: pedido.items,
+    total: pedido.items.reduce((sum, i) => sum + (i.price * i.quantity), 0)
+  };
 }
 
-module.exports = { gerarOrdemCompra };
+module.exports = { generateOC };

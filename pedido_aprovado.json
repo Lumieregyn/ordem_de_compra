@@ -1,7 +1,7 @@
 {
-  "numero_pedido": "123456",
-  "fornecedor": "Fornecedor Exemplo",
-  "itens": [
-    { "sku": "PEDIDO NORD 56390", "quantidade": 2, "preco": 159.99 }
+  "id": "12345",
+  "items": [
+    { "sku": "PROD001", "description": "Produto A", "quantity": 2, "price": 50 },
+    { "sku": "PROD002", "description": "Produto B", "quantity": 1, "price": 100 }
   ]
 }

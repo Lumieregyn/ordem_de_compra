@@ -20,9 +20,10 @@ app.get('/auth', (req, res) => {
       .status(500)
       .send('Faltam as variáveis CLIENT_ID ou REDIRECT_URI');
   }
-  const authUrl = `https://api.tiny.com.br/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(
-    redirectUri
-  )}`;
+  const authUrl = 'https://api.tiny.com.br/oauth2/authorize' +
+    '?response_type=code' +
+    `&client_id=${clientId}` +
+    `&redirect_uri=${encodeURIComponent(redirectUri)}`;
   return res.redirect(authUrl);
 });
 
@@ -33,9 +34,8 @@ app.get('/callback', async (req, res) => {
   if (!code) {
     return res.status(400).send('Parâmetro "code" não fornecido');
   }
-  // Aqui você trocaria code por access_token (fluxo OAuth2)
-  // Ex.: fetch('https://api.tiny.com.br/oauth2/token', { ... })
-  return res.send(`Código recebido do Tiny: ${code}`);
+  // TODO: Trocar code por access_token
+  return res.send(\`Código recebido do Tiny: \${code}\`);
 });
 
 // Gera a OC com base no pedido salvo em JSON
@@ -60,5 +60,5 @@ app.get('/', (req, res) => res.send('API de Ordem de Compra Inteligente OK'));
 
 // Inicia o servidor
 app.listen(port, () => {
-  console.log(`🚀 Servidor rodando na porta ${port}`);
+  console.log(\`🚀 Servidor rodando na porta \${port}\`);
 });
