@@ -57,6 +57,10 @@ app.get('/callback', async (req, res) => {
   }
 });
 
+app.get('/', (req, res) => {
+  res.send('✅ Backend de Ordem de Compra Inteligente está ativo.');
+});
+
 // Rota /gerar-oc – Simula geração da OC com token
 app.get('/gerar-oc', (req, res) => {
   console.log('📦 Rota /gerar-oc acessada');
