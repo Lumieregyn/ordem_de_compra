@@ -20,9 +20,7 @@ function gerarOrdemCompra() {
       <total>400</total>
     </pedido>
   </dados>
-</pedido>
-  `.trim();
-
+</pedido>`;
   return xml;
 }
 
