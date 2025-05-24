@@ -1,12 +1,7 @@
 // services/ocGenerator.js
-module.exports = {
-  generateOC: (pedido) => {
-    return {
-      ordem: {
-        id: `OC-${Date.now()}`,
-        items: pedido.items,
-        total: pedido.items.reduce((sum, i) => sum + i.price * i.quantity, 0)
-      }
-    };
-  }
+exports.generateOrder = (pedido) => {
+  // monte o XML ou JSON que o Tiny espera
+  // ex.: `<order><id>${pedido.id}</id>...</order>`
+  // ou retorne JSON puro, se a API aceitar.
+  return `<order><id>${pedido.id}</id>...</order>`;
 };
