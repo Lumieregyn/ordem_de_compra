@@ -4,6 +4,7 @@ const axios = require('axios');
 const { gerarOrdemCompra } = require('./services/ocGenerator');
 const { enviarOrdemCompra } = require('./services/enviarOrdem');
 const xml2js = require('xml2js');
+const qs = require('qs');
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -33,16 +34,19 @@ app.get('/callback', async (req, res) => {
   }
 
   try {
-    const response = await axios.post('https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token', null, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      params: {
+    const response = await axios.post(
+      'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
+      qs.stringify({
         grant_type: 'authorization_code',
         code,
         client_id: process.env.CLIENT_ID,
         client_secret: process.env.CLIENT_SECRET,
         redirect_uri: process.env.REDIRECT_URI
+      }),
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       }
-    });
+    );
 
     accessToken = response.data.access_token;
     console.log('✅ Token de acesso armazenado.');
