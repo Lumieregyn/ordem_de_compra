@@ -91,7 +91,7 @@ app.get('/listar-marcas', async (req, res) => {
           params: {
             token,
             formato: 'json',
-            pagina,
+            pagina
           },
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded'
@@ -119,8 +119,8 @@ app.get('/listar-marcas', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erro ao listar marcas:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Erro ao listar marcas.' });
+    console.error('❌ Erro ao buscar marcas:', error.response?.data || error.message);
+    res.status(500).send('Erro ao consultar marcas na API da Tiny.');
   }
 });
 
