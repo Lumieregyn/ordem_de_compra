@@ -1,36 +1,56 @@
+// Estrutura reorganizada — integração com MongoDB adicionada e rota de consulta de produto incluída
+
+// index.js
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const qs = require('qs');
 const pLimit = require('p-limit');
+const { MongoClient } = require('mongodb');
 const { gerarOrdemCompra } = require('./services/ocGenerator');
 const { enviarOrdemCompra } = require('./services/enviarOrdem');
 const { inserirMarca, marcaExiste } = require('./services/pinecone');
 
 const app = express();
 const port = process.env.PORT || 8080;
-
 let accessToken = null;
 
-// Rota de autenticação OAuth2
+// MongoDB connection
+const mongoClient = new MongoClient(process.env.MONGO_URI);
+let produtosCollection;
+
+mongoClient.connect().then(() => {
+  const db = mongoClient.db('ordens');
+  produtosCollection = db.collection('produtos');
+  console.log('✅ Conectado ao MongoDB');
+});
+
+async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
+  if (!codigo || !nome || !marca) return;
+  await produtosCollection.updateOne(
+    { codigo },
+    {
+      $set: {
+        nome,
+        marca,
+        atualizado_em: new Date().toISOString()
+      }
+    },
+    { upsert: true }
+  );
+}
+
+// 🔐 Autenticação Tiny
 app.get('/auth', (req, res) => {
   const clientId = process.env.CLIENT_ID;
   const redirectUri = process.env.REDIRECT_URI;
-  const authUrl = `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth` +
-    `?response_type=code` +
-    `&client_id=${encodeURIComponent(clientId)}` +
-    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&scope=openid`;
-
-  console.log('➡️ Redirecionando para:', authUrl);
+  const authUrl = `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid`;
   res.redirect(authUrl);
 });
 
-// Callback da autenticação
 app.get('/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.send('Erro: código de autorização ausente.');
-
   try {
     const response = await axios.post(
       'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
@@ -43,43 +63,34 @@ app.get('/callback', async (req, res) => {
       }),
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     );
-
     accessToken = response.data.access_token;
-    console.log('✅ Token de acesso armazenado.');
-    res.send('Autenticação concluída com sucesso! Agora você pode chamar /enviar-oc');
+    res.send('Autenticação concluída com sucesso!');
   } catch (error) {
-    console.error('❌ Erro ao obter token:', error.response?.data || error.message);
     res.send('Erro ao obter token.');
   }
 });
 
-// Envia ordem de compra para a Tiny
+// 📦 Envia OC
 app.get('/enviar-oc', async (req, res) => {
-  if (!accessToken) {
-    return res.send('No access token. Call /auth first.');
-  }
-
+  if (!accessToken) return res.send('No access token. Call /auth first.');
   try {
     const xml = gerarOrdemCompra();
     const response = await enviarOrdemCompra(accessToken, xml);
-    console.log('✅ Ordem de compra enviada!');
-    console.log(response);
     res.send('Ordem de compra enviada com sucesso!');
   } catch (error) {
-    console.error('❌ Erro no envio da OC:', error.message);
     res.send('Erro ao enviar ordem de compra.');
   }
 });
 
-// Listar marcas com paralelismo e controle
+// 🧠 Listar marcas e salvar produtos no MongoDB
 app.get('/listar-marcas', async (req, res) => {
   const token = process.env.TINY_API_TOKEN;
   const marcasUnicas = new Set();
   let pagina = 1;
   let totalProdutos = 0;
   let totalInseridas = 0;
-  const limit = pLimit(5);
   const inicio = Date.now();
+  const limit = pLimit(5);
 
   try {
     while (true) {
@@ -99,22 +110,29 @@ app.get('/listar-marcas', async (req, res) => {
       const produtos = response.data?.retorno?.produtos || [];
       if (!produtos.length) break;
 
-      console.log(`🎯 Página ${pagina} com ${produtos.length} produtos.`);
+      let novas = 0;
+      console.log(`[Página ${pagina}] Processando ${produtos.length} produtos...`);
 
       const tarefas = produtos.map(p => limit(async () => {
         totalProdutos++;
+        const codigo = p.produto?.codigo;
+        const nome = p.produto?.nome;
         const marca = p.produto?.marca?.trim();
+        if (codigo && nome && marca) await salvarOuAtualizarProduto({ codigo, nome, marca });
+
         if (marca && !marcasUnicas.has(marca)) {
           const existe = await marcaExiste(marca);
           if (!existe) {
             await inserirMarca(marca);
             marcasUnicas.add(marca);
+            novas++;
             totalInseridas++;
           }
         }
       }));
 
       await Promise.all(tarefas);
+      console.log(`→ Marcas novas: ${novas} adicionadas ao Pinecone`);
 
       const ultimaPagina = response.data?.retorno?.numero_paginas;
       if (!ultimaPagina || pagina >= ultimaPagina) break;
@@ -124,9 +142,10 @@ app.get('/listar-marcas', async (req, res) => {
     const fim = Date.now();
     const duracao = ((fim - inicio) / 1000).toFixed(1);
 
-    console.log(`✅ Concluído em ${duracao}s — ${pagina} páginas`);
-    console.log(`🔢 Produtos analisados: ${totalProdutos}`);
+    console.log(`✅ Concluído: ${pagina} páginas processadas`);
+    console.log(`🔢 Total de produtos analisados: ${totalProdutos}`);
     console.log(`🏷️ Novas marcas indexadas: ${totalInseridas}`);
+    console.log(`🕒 Tempo total: ${duracao} segundos`);
 
     res.json({
       sucesso: true,
@@ -135,14 +154,25 @@ app.get('/listar-marcas', async (req, res) => {
       marcasNovas: totalInseridas,
       tempo: duracao + 's'
     });
-
   } catch (error) {
-    console.error('❌ Erro ao listar marcas:', error.response?.data || error.message);
     res.status(500).json({ error: 'Erro ao listar marcas.' });
   }
 });
 
-// Inicializa servidor
+// 🔍 Buscar produto por código
+app.get('/produto/:codigo', async (req, res) => {
+  const codigo = req.params.codigo;
+  if (!codigo) return res.status(400).json({ erro: 'Código é obrigatório' });
+  try {
+    const produto = await produtosCollection.findOne({ codigo });
+    if (!produto) return res.status(404).json({ erro: 'Produto não encontrado' });
+    res.json(produto);
+  } catch (error) {
+    res.status(500).json({ erro: 'Erro ao buscar produto' });
+  }
+});
+
+// 🚀 Inicializa servidor
 app.listen(port, () => {
   console.log(`🚀 Servidor rodando na porta ${port}`);
 });
