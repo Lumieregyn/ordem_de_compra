@@ -2,8 +2,9 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 
+// Rota para listar marcas únicas de todos os produtos cadastrados na Tiny
 router.get('/listar-marcas', async (req, res) => {
-  const accessToken = req.query.token; // Ou use o token armazenado
+  const accessToken = process.env.TINY_API_TOKEN; // Token salvo no Railway
   const marcasUnicas = new Set();
   let pagina = 1;
   let continuar = true;
@@ -34,7 +35,7 @@ router.get('/listar-marcas', async (req, res) => {
         }
       });
 
-      const ultimaPagina = response.data?.retorno?.numero_paginas;
+      const ultimaPagina = response.data?.retorno?.numero_paginas || 1;
       continuar = pagina < ultimaPagina;
       pagina++;
     }
@@ -45,7 +46,7 @@ router.get('/listar-marcas', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erro ao buscar marcas:', error.response?.data || error.message);
+    console.error('❌ Erro ao buscar marcas:', error.response?.data || error.message);
     res.status(500).send('Erro ao consultar marcas na API da Tiny.');
   }
 });
