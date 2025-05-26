@@ -1,139 +1,159 @@
-require('dotenv').config();
+// Estrutura consolidada do repositório analisado e atualizada com logs detalhados:
+
+// index.js
 const express = require('express');
-const axios = require('axios');
-const qs = require('qs');
+const app = express();
+const routes = require('./routes');
+require('dotenv').config();
+
+app.use(express.json());
+app.use('/', routes);
+
+app.listen(3000, () => console.log('Servidor iniciado na porta 3000'));
+
+
+// routes.js
+const express = require('express');
+const router = express.Router();
+const { authTiny, callbackTiny } = require('./services/tinyAuth');
 const { gerarOrdemCompra } = require('./services/ocGenerator');
 const { enviarOrdemCompra } = require('./services/enviarOrdem');
-const { inserirMarca } = require('./services/pinecone');
+const { listarMarcas } = require('./services/pinecone');
 
-const app = express();
-const port = process.env.PORT || 8080;
-
-let accessToken = null;
-
-// Rota de autenticação OAuth2
-app.get('/auth', (req, res) => {
-  console.log('🔍 /auth route hit');
-  const clientId = process.env.CLIENT_ID;
-  const redirectUri = process.env.REDIRECT_URI;
-  const authUrl = `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth` +
-    `?response_type=code` +
-    `&client_id=${encodeURIComponent(clientId)}` +
-    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&scope=openid`;
-
-  console.log('➡️ Redirecionando para:', authUrl);
-  res.redirect(authUrl);
-});
-
-// Callback da autenticação
-app.get('/callback', async (req, res) => {
-  console.log('📥 /callback route hit');
-  const code = req.query.code;
-
-  if (!code) {
-    return res.send('Erro: código de autorização ausente.');
-  }
-
+router.get('/auth', authTiny);
+router.get('/callback', callbackTiny);
+router.post('/enviar-oc', async (req, res) => {
   try {
-    const response = await axios.post(
-      'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
-      qs.stringify({
-        grant_type: 'authorization_code',
-        code,
-        client_id: process.env.CLIENT_ID,
-        client_secret: process.env.CLIENT_SECRET,
-        redirect_uri: process.env.REDIRECT_URI
-      }),
-      {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    const xml = gerarOrdemCompra(req.body);
+    const resultado = await enviarOrdemCompra(xml);
+    res.json(resultado);
+  } catch (err) {
+    res.status(500).json({ erro: 'Falha ao enviar OC', detalhes: err.message });
+  }
+});
+router.get('/listar-marcas', listarMarcas);
+
+module.exports = router;
+
+
+// services/ocGenerator.js
+const xml2js = require('xml2js');
+const crypto = require('crypto');
+
+function gerarOrdemCompra(dados) {
+  const builder = new xml2js.Builder({ headless: true });
+  const objetoXml = {
+    pedido: {
+      data_pedido: new Date().toISOString().split('T')[0],
+      cliente: {
+        nome: dados.nome || 'Cliente Padrão',
+        codigo: dados.codigo || '1',
+      },
+      itens: {
+        item: dados.itens.map((i, index) => ({
+          codigo: i.codigo,
+          descricao: i.descricao,
+          quantidade: i.quantidade,
+          valor_unitario: i.valor_unitario
+        }))
       }
-    );
-
-    accessToken = response.data.access_token;
-    console.log('✅ Token de acesso armazenado.');
-    res.send('Autenticação concluída com sucesso! Agora você pode chamar /enviar-oc');
-  } catch (error) {
-    console.error('❌ Erro ao obter access token:', error.response?.data || error.message);
-    res.send('Erro ao obter token.');
-  }
-});
-
-// Envia ordem de compra para a Tiny
-app.get('/enviar-oc', async (req, res) => {
-  if (!accessToken) {
-    return res.send('No access token. Call /auth first.');
-  }
-
-  try {
-    const xml = gerarOrdemCompra();
-    const response = await enviarOrdemCompra(accessToken, xml);
-
-    console.log('✅ Ordem de compra enviada com sucesso!');
-    console.log(response);
-
-    res.send('Ordem de compra enviada com sucesso!');
-  } catch (error) {
-    console.error('❌ Erro no envio da OC:', error.message);
-    res.send('Erro ao enviar ordem de compra.');
-  }
-});
-
-// Lista marcas únicas e salva no Pinecone
-app.get('/listar-marcas', async (req, res) => {
-  const token = process.env.TINY_API_TOKEN;
-  const marcasUnicas = new Set();
-  let pagina = 1;
-  let continuar = true;
-
-  try {
-    while (continuar) {
-      const response = await axios.post(
-        'https://api.tiny.com.br/api2/produtos.pesquisa.php',
-        null,
-        {
-          params: {
-            token,
-            formato: 'json',
-            pagina
-          },
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          }
-        }
-      );
-
-      const produtos = response.data?.retorno?.produtos || [];
-
-      if (produtos.length === 0) break;
-
-      console.log(`🎯 Página ${pagina} com ${produtos.length} produtos.`);
-
-      for (const p of produtos) {
-        const marca = p.produto?.marca?.trim();
-        if (marca && !marcasUnicas.has(marca)) {
-          marcasUnicas.add(marca);
-          await inserirMarca(marca);
-        }
-      }
-
-      const ultimaPagina = response.data?.retorno?.numero_paginas;
-      continuar = pagina < ultimaPagina;
-      pagina++;
     }
+  };
+  return builder.buildObject(objetoXml);
+}
 
-    res.json({
-      marcas: Array.from(marcasUnicas).sort(),
-      total: marcasUnicas.size
+module.exports = { gerarOrdemCompra };
+
+
+// services/enviarOrdem.js
+const axios = require('axios');
+const qs = require('qs');
+require('dotenv').config();
+
+async function enviarOrdemCompra(xml) {
+  const params = qs.stringify({ token: process.env.TINY_API_TOKEN, xml });
+  const url = `https://api.tiny.com.br/api2/pedido.incluir.php?${params}`;
+  try {
+    const { data } = await axios.get(url);
+    return data.retorno;
+  } catch (err) {
+    return { erro: true, mensagem: err.message };
+  }
+}
+
+module.exports = { enviarOrdemCompra };
+
+
+// services/pinecone.js
+const axios = require('axios');
+const crypto = require('crypto');
+
+async function inserirMarca(marca) {
+  const id = crypto.createHash('md5').update(marca).digest('hex');
+  const vetor = new Array(1536).fill(0);
+
+  await axios.post('https://lumiere-logs-ada-gqv3rnm.svc.aped-4627-b74a.pinecone.io/vectors/upsert', {
+    namespace: 'marcas',
+    vectors: [{ id, values: vetor, metadata: { marca } }]
+  }, {
+    headers: { 'Api-Key': process.env.PINECONE_API_KEY }
+  });
+}
+
+async function marcaExiste(marca) {
+  const id = crypto.createHash('md5').update(marca).digest('hex');
+  const res = await axios.post('https://lumiere-logs-ada-gqv3rnm.svc.aped-4627-b74a.pinecone.io/vectors/fetch', {
+    ids: [id], namespace: 'marcas'
+  }, {
+    headers: { 'Api-Key': process.env.PINECONE_API_KEY }
+  });
+
+  return res.data.vectors && res.data.vectors[id];
+}
+
+async function listarMarcas(req, res) {
+  const marcasEncontradas = new Set();
+  let pagina = 1, total = 0, totalProdutos = 0;
+  const inicio = Date.now();
+
+  while (true) {
+    const { data } = await axios.get('https://api.tiny.com.br/api2/produtos.pesquisa.php', {
+      params: { token: process.env.TINY_API_TOKEN, pagina },
     });
 
-  } catch (error) {
-    console.error('❌ Erro ao listar marcas:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Erro ao listar marcas.' });
-  }
-});
+    const produtos = data.retorno.produtos || [];
+    if (!produtos.length) break;
 
-// Inicializa o servidor
-app.listen(port, () => {
-  console.log(`🚀 Servidor rodando na porta ${port}`);
-});
+    console.log(`[Página ${pagina}] Processando ${produtos.length} produtos...`);
+
+    for (const p of produtos) {
+      totalProdutos++;
+      const marca = p.produto.marca;
+      if (marca && !marcasEncontradas.has(marca)) {
+        const existe = await marcaExiste(marca);
+        if (!existe) await inserirMarca(marca);
+        marcasEncontradas.add(marca);
+        total++;
+      }
+    }
+    pagina++;
+  }
+
+  const fim = Date.now();
+  const duracao = ((fim - inicio) / 1000).toFixed(1);
+
+  console.log(`✅ Concluído: ${pagina - 1} páginas processadas`);
+  console.log(`🔢 Total de produtos analisados: ${totalProdutos}`);
+  console.log(`🏷️ Novas marcas indexadas: ${total}`);
+  console.log(`🕒 Tempo total: ${duracao} segundos`);
+
+  res.json({
+    sucesso: true,
+    paginas: pagina - 1,
+    produtos: totalProdutos,
+    marcasNovas: total,
+    tempo: duracao + 's'
+  });
+}
+
+module.exports = { listarMarcas };
