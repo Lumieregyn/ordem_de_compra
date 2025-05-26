@@ -1,11 +1,14 @@
-       {
+{
   "name": "ordem_de_compra",
   "version": "1.0.0",
+  "description": "Sistema de envio automático de Ordens de Compra via integração com a API Tiny ERP",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
+  "author": "LUMIÉREGYN",
+  "license": "MIT",
   "dependencies": {
     "axios": "^1.6.0",
     "dotenv": "^16.0.3",
