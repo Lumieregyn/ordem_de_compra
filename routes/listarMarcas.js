@@ -1,41 +1,84 @@
 const axios = require('axios');
 const pLimit = require('p-limit');
-const { inserirMarca, marcaExiste } = require('../services/pinecone');
+const { MongoClient } = require('mongodb');
+
+const mongoClient = new MongoClient(process.env.MONGO_URI);
+let produtosCollection;
+
+mongoClient.connect().then(() => {
+  const db = mongoClient.db('ordens');
+  produtosCollection = db.collection('produtos');
+  console.log('✅ [rotas/listarMarcas] Conectado ao MongoDB');
+});
+
+async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
+  if (!codigo || !nome || !marca) return;
+  await produtosCollection.updateOne(
+    { codigo },
+    {
+      $set: {
+        nome,
+        marca,
+        atualizado_em: new Date().toISOString()
+      }
+    },
+    { upsert: true }
+  );
+}
 
 async function listarMarcas(req, res) {
-  const marcasEncontradas = new Set();
-  let pagina = 1, total = 0, totalProdutos = 0;
+  const token = process.env.TINY_API_TOKEN;
+  let pagina = 1;
+  let totalProdutos = 0;
+  let totalMarcasUnicas = 0;
   const inicio = Date.now();
   const limit = pLimit(5);
 
   try {
     while (true) {
-      const { data } = await axios.get('https://api.tiny.com.br/api2/produtos.pesquisa.php', {
-        params: {
-          token: process.env.TINY_API_TOKEN,
-          pagina
+      const response = await axios.post(
+        'https://api.tiny.com.br/api2/produtos.pesquisa.php',
+        null,
+        {
+          params: {
+            token,
+            formato: 'json',
+            pagina
+          },
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         }
-      });
+      );
 
-      const produtos = data.retorno.produtos || [];
+      const produtos = response.data?.retorno?.produtos || [];
       if (!produtos.length) break;
+
+      let marcasPagina = new Set();
 
       console.log(`[Página ${pagina}] Processando ${produtos.length} produtos...`);
 
       const tarefas = produtos.map(p => limit(async () => {
         totalProdutos++;
-        const marca = p.produto.marca?.trim();
-        if (marca && !marcasEncontradas.has(marca)) {
-          const existe = await marcaExiste(marca);
-          if (!existe) {
-            await inserirMarca(marca);
-            marcasEncontradas.add(marca);
-            total++;
+        const codigo = p.produto?.codigo;
+        const nome = p.produto?.nome?.trim();
+        let marca = p.produto?.marca?.trim();
+
+        if (!marca && nome) {
+          const match = nome.match(/^([^-–]+)/); // Extrai até o hífen
+          if (match && match[1]) {
+            marca = match[1].trim();
           }
+        }
+
+        if (codigo && nome && marca) {
+          marcasPagina.add(marca);
+          await salvarOuAtualizarProduto({ codigo, nome, marca });
         }
       }));
 
       await Promise.all(tarefas);
+
+      console.log(`→ Marcas únicas nesta página: ${marcasPagina.size}`);
+      totalMarcasUnicas += marcasPagina.size;
       pagina++;
     }
 
@@ -44,14 +87,14 @@ async function listarMarcas(req, res) {
 
     console.log(`✅ Concluído: ${pagina - 1} páginas processadas`);
     console.log(`🔢 Total de produtos analisados: ${totalProdutos}`);
-    console.log(`🏷️ Novas marcas indexadas: ${total}`);
+    console.log(`🏷️ Marcas únicas identificadas: ${totalMarcasUnicas}`);
     console.log(`🕒 Tempo total: ${duracao} segundos`);
 
     res.json({
       sucesso: true,
       paginas: pagina - 1,
       produtos: totalProdutos,
-      marcasNovas: total,
+      marcasUnicas: totalMarcasUnicas,
       tempo: duracao + 's'
     });
 
