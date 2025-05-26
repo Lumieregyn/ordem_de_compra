@@ -1,13 +1,16 @@
 app.get('/listar-marcas', async (req, res) => {
-  const token = process.env.TINY_API_TOKEN;
+  const token = accessToken || process.env.TINY_API_TOKEN;
+
+  if (!token) {
+    return res.status(401).json({ error: 'Token de acesso não encontrado.' });
+  }
+
   const marcasUnicas = new Set();
   let pagina = 1;
   let continuar = true;
 
   try {
     while (continuar) {
-      console.log(`📦 Consultando página ${pagina} da API da Tiny...`);
-
       const response = await axios.post(
         'https://api.tiny.com.br/api2/produtos.pesquisa.php',
         null,
@@ -15,7 +18,7 @@ app.get('/listar-marcas', async (req, res) => {
           params: {
             token,
             formato: 'json',
-            pagina
+            pagina,
           },
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded'
@@ -23,40 +26,32 @@ app.get('/listar-marcas', async (req, res) => {
         }
       );
 
-      const retorno = response.data?.retorno;
-      if (!retorno || retorno.status !== 'OK') {
-        console.error('❌ Erro na resposta da Tiny:', retorno?.erros || 'Resposta malformada');
-        return res.status(500).json({ error: 'Erro na resposta da API da Tiny.', detalhes: retorno });
+      const produtos = response.data?.retorno?.produtos || [];
+
+      // 🚨 Debug opcional: veja como os produtos estão vindo
+      if (pagina === 1) {
+        console.log('🔎 Primeira página recebida:', JSON.stringify(produtos, null, 2));
       }
 
-      const produtos = retorno.produtos || [];
-      produtos.forEach(p => {
+      produtos.forEach((p) => {
         const marca = p.produto?.marca;
         if (marca) {
           marcasUnicas.add(marca.trim());
         }
       });
 
-      const ultimaPagina = retorno.numero_paginas || 1;
+      const ultimaPagina = parseInt(response.data?.retorno?.numero_paginas || 1);
       continuar = pagina < ultimaPagina;
       pagina++;
-
-      // Limite de segurança durante testes
-      if (pagina > 10) {
-        console.warn('⚠️ Interrompido em 10 páginas por segurança.');
-        break;
-      }
     }
 
-    const listaFinal = Array.from(marcasUnicas).sort();
-    console.log(`✅ Marcas coletadas: ${listaFinal.length}`);
     res.json({
-      marcas: listaFinal,
-      total: listaFinal.length
+      marcas: Array.from(marcasUnicas).sort(),
+      total: marcasUnicas.size
     });
 
   } catch (error) {
-    console.error('❌ Erro ao consultar marcas:', error.response?.data || error.message);
-    res.status(500).send('Erro ao consultar marcas na API da Tiny.');
+    console.error('❌ Erro ao buscar marcas:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Erro ao consultar marcas na API da Tiny.' });
   }
 });
