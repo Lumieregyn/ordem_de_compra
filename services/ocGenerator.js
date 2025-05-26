@@ -1,22 +1,25 @@
-<pedido>
-  <data_pedido>2025-05-26</data_pedido>
-  <cliente>
-    <codigo>1</codigo>
-    <nome>Cliente Padrão</nome>
-  </cliente>
-  <forma_pagamento>Boleto</forma_pagamento>
-  <condicao_pagamento>A prazo</condicao_pagamento>
-  <transporte>
-    <transportadora>Transportadora X</transportadora>
-    <frete_por_conta>0</frete_por_conta>
-  </transporte>
-  <itens>
-    <item>
-      <codigo>001</codigo>
-      <descricao>Produto A</descricao>
-      <quantidade>1</quantidade>
-      <valor_unitario>10.0</valor_unitario>
-    </item>
-    ...
-  </itens>
-</pedido>
+const xml2js = require('xml2js');
+
+function gerarOrdemCompra(dados) {
+  const builder = new xml2js.Builder({ headless: true });
+  const objetoXml = {
+    pedido: {
+      data_pedido: new Date().toISOString().split('T')[0],
+      cliente: {
+        nome: dados.nome || 'Cliente Padrão',
+        codigo: dados.codigo || '1',
+      },
+      itens: {
+        item: dados.itens.map(i => ({
+          codigo: i.codigo,
+          descricao: i.descricao,
+          quantidade: i.quantidade,
+          valor_unitario: i.valor_unitario
+        }))
+      }
+    }
+  };
+  return builder.buildObject(objetoXml);
+}
+
+module.exports = { gerarOrdemCompra };
