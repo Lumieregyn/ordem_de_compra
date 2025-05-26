@@ -1,4 +1,4 @@
-// Estrutura reorganizada — integração com MongoDB adicionada e rota de consulta de produto incluída
+// Estrutura reorganizada — Pinecone removido e MongoDB com fallback de marca ativado
 
 // index.js
 require('dotenv').config();
@@ -9,7 +9,6 @@ const pLimit = require('p-limit');
 const { MongoClient } = require('mongodb');
 const { gerarOrdemCompra } = require('./services/ocGenerator');
 const { enviarOrdemCompra } = require('./services/enviarOrdem');
-const { inserirMarca, marcaExiste } = require('./services/pinecone');
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -82,13 +81,11 @@ app.get('/enviar-oc', async (req, res) => {
   }
 });
 
-// 🧠 Listar marcas e salvar produtos no MongoDB
+// 🧠 Listar marcas e salvar produtos no MongoDB (sem Pinecone)
 app.get('/listar-marcas', async (req, res) => {
   const token = process.env.TINY_API_TOKEN;
-  const marcasUnicas = new Set();
   let pagina = 1;
   let totalProdutos = 0;
-  let totalInseridas = 0;
   const inicio = Date.now();
   const limit = pLimit(5);
 
@@ -110,32 +107,28 @@ app.get('/listar-marcas', async (req, res) => {
       const produtos = response.data?.retorno?.produtos || [];
       if (!produtos.length) break;
 
-      let novas = 0;
       console.log(`[Página ${pagina}] Processando ${produtos.length} produtos...`);
 
       const tarefas = produtos.map(p => limit(async () => {
         totalProdutos++;
         const codigo = p.produto?.codigo;
-        const nome = p.produto?.nome;
-        const marca = p.produto?.marca?.trim();
-        if (codigo && nome && marca) await salvarOuAtualizarProduto({ codigo, nome, marca });
+        const nome = p.produto?.nome?.trim();
+        let marca = p.produto?.marca?.trim();
 
-        if (marca && !marcasUnicas.has(marca)) {
-          const existe = await marcaExiste(marca);
-          if (!existe) {
-            await inserirMarca(marca);
-            marcasUnicas.add(marca);
-            novas++;
-            totalInseridas++;
+        // Fallback: extrai a marca com base no nome
+        if (!marca && nome) {
+          const match = nome.match(/^([^-–]+)/); // pega antes do hífen
+          if (match && match[1]) {
+            marca = match[1].trim();
           }
+        }
+
+        if (codigo && nome && marca) {
+          await salvarOuAtualizarProduto({ codigo, nome, marca });
         }
       }));
 
       await Promise.all(tarefas);
-      console.log(`→ Marcas novas: ${novas} adicionadas ao Pinecone`);
-
-      const ultimaPagina = response.data?.retorno?.numero_paginas;
-      if (!ultimaPagina || pagina >= ultimaPagina) break;
       pagina++;
     }
 
@@ -144,18 +137,16 @@ app.get('/listar-marcas', async (req, res) => {
 
     console.log(`✅ Concluído: ${pagina} páginas processadas`);
     console.log(`🔢 Total de produtos analisados: ${totalProdutos}`);
-    console.log(`🏷️ Novas marcas indexadas: ${totalInseridas}`);
     console.log(`🕒 Tempo total: ${duracao} segundos`);
 
     res.json({
       sucesso: true,
       paginas: pagina,
       produtos: totalProdutos,
-      marcasNovas: totalInseridas,
       tempo: duracao + 's'
     });
   } catch (error) {
-    res.status(500).json({ error: 'Erro ao listar marcas.' });
+    res.status(500).json({ error: 'Erro ao listar produtos.' });
   }
 });
 
