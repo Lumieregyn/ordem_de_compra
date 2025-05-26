@@ -1,17 +1,17 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
+const qs = require('qs');
 const { gerarOrdemCompra } = require('./services/ocGenerator');
 const { enviarOrdemCompra } = require('./services/enviarOrdem');
-const xml2js = require('xml2js');
-const qs = require('qs');
+const { inserirMarca } = require('./services/pinecone');
 
 const app = express();
 const port = process.env.PORT || 8080;
 
 let accessToken = null;
 
-// 🔐 AUTENTICAÇÃO
+// Rota de autenticação OAuth2
 app.get('/auth', (req, res) => {
   console.log('🔍 /auth route hit');
   const clientId = process.env.CLIENT_ID;
@@ -26,7 +26,7 @@ app.get('/auth', (req, res) => {
   res.redirect(authUrl);
 });
 
-// 🔄 CALLBACK TOKEN
+// Callback da autenticação
 app.get('/callback', async (req, res) => {
   console.log('📥 /callback route hit');
   const code = req.query.code;
@@ -59,7 +59,7 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// 📤 ENVIO DE ORDEM DE COMPRA
+// Envia ordem de compra para a Tiny
 app.get('/enviar-oc', async (req, res) => {
   if (!accessToken) {
     return res.send('No access token. Call /auth first.');
@@ -79,10 +79,10 @@ app.get('/enviar-oc', async (req, res) => {
   }
 });
 
-// 🔎 LISTAR MARCAS USANDO TOKEN ESTÁTICO (TINY_API_TOKEN)
+// Lista marcas únicas e salva no Pinecone
 app.get('/listar-marcas', async (req, res) => {
   const token = process.env.TINY_API_TOKEN;
-  const marcas = new Set();
+  const marcasUnicas = new Set();
   let pagina = 1;
   let continuar = true;
 
@@ -104,11 +104,18 @@ app.get('/listar-marcas', async (req, res) => {
       );
 
       const produtos = response.data?.retorno?.produtos || [];
+
+      if (produtos.length === 0) break;
+
       console.log(`🎯 Página ${pagina} com ${produtos.length} produtos.`);
-      produtos.forEach(p => {
-        const marca = p?.produto?.marca;
-        if (marca) marcas.add(marca.trim());
-      });
+
+      for (const p of produtos) {
+        const marca = p.produto?.marca?.trim();
+        if (marca && !marcasUnicas.has(marca)) {
+          marcasUnicas.add(marca);
+          await inserirMarca(marca);
+        }
+      }
 
       const ultimaPagina = response.data?.retorno?.numero_paginas;
       continuar = pagina < ultimaPagina;
@@ -116,8 +123,8 @@ app.get('/listar-marcas', async (req, res) => {
     }
 
     res.json({
-      marcas: Array.from(marcas).sort(),
-      total: marcas.size
+      marcas: Array.from(marcasUnicas).sort(),
+      total: marcasUnicas.size
     });
 
   } catch (error) {
@@ -126,7 +133,7 @@ app.get('/listar-marcas', async (req, res) => {
   }
 });
 
-// 🔊 START SERVER
+// Inicializa o servidor
 app.listen(port, () => {
   console.log(`🚀 Servidor rodando na porta ${port}`);
 });
