@@ -1,3 +1,5 @@
+// Estrutura atualizada — fallback real usando produto.obter.php para obter marca
+
 const axios = require('axios');
 const pLimit = require('p-limit');
 const { MongoClient } = require('mongodb');
@@ -24,6 +26,26 @@ async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
     },
     { upsert: true }
   );
+}
+
+async function obterMarcaPorCodigo(codigo, token) {
+  try {
+    const { data } = await axios.post(
+      'https://api.tiny.com.br/api2/produto.obter.php',
+      null,
+      {
+        params: {
+          token,
+          formato: 'json',
+          codigo
+        },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      }
+    );
+    return data?.retorno?.produto?.marca?.trim() || null;
+  } catch (err) {
+    return null;
+  }
 }
 
 async function listarMarcas(req, res) {
@@ -62,12 +84,8 @@ async function listarMarcas(req, res) {
         const nome = p.produto?.nome?.trim();
         let marca = p.produto?.marca?.trim();
 
-        // Fallback: extrair marca do nome
-        if (!marca && nome) {
-          const match = nome.match(/^([^-–]+)/);
-          if (match && match[1]) {
-            marca = match[1].trim();
-          }
+        if (!marca && codigo) {
+          marca = await obterMarcaPorCodigo(codigo, token);
         }
 
         if (codigo && nome && marca) {
@@ -98,7 +116,6 @@ async function listarMarcas(req, res) {
       marcasUnicas: totalMarcasUnicas,
       tempo: duracao + 's'
     });
-
   } catch (error) {
     console.error('❌ Erro ao listar marcas:', error.response?.data || error.message);
     res.status(500).json({ erro: 'Erro ao listar marcas.' });
