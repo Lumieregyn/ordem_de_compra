@@ -77,28 +77,47 @@ app.get('/enviar-oc', async (req, res) => {
 });
 
 app.get('/listar-marcas', async (req, res) => {
-  if (!accessToken) {
-    return res.status(401).json({ error: 'Não autenticado. Faça /auth primeiro.' });
-  }
+  const token = process.env.TINY_API_TOKEN;
+  const marcasUnicas = new Set();
+  let pagina = 1;
+  let continuar = true;
 
   try {
-    const response = await axios.get('https://api.tiny.com.br/api2/produto.pesquisa.php', {
-      params: {
-        token: accessToken,
-        formato: 'json'
-      }
+    while (continuar) {
+      const response = await axios.post(
+        'https://api.tiny.com.br/api2/produtos.pesquisa.php',
+        null,
+        {
+          params: {
+            token,
+            formato: 'json',
+            pagina,
+          },
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          }
+        }
+      );
+
+      const produtos = response.data?.retorno?.produtos || [];
+
+      produtos.forEach(p => {
+        const marca = p.produto?.marca;
+        if (marca) {
+          marcasUnicas.add(marca.trim());
+        }
+      });
+
+      const ultimaPagina = response.data?.retorno?.numero_paginas || 1;
+      continuar = pagina < ultimaPagina;
+      pagina++;
+    }
+
+    res.json({
+      marcas: Array.from(marcasUnicas).sort(),
+      total: marcasUnicas.size
     });
 
-    const produtos = response.data.retorno.produtos || [];
-    const marcas = new Set();
-
-    produtos.forEach((p) => {
-      if (p.produto && p.produto.marca) {
-        marcas.add(p.produto.marca);
-      }
-    });
-
-    res.json({ marcas: Array.from(marcas) });
   } catch (error) {
     console.error('❌ Erro ao listar marcas:', error.response?.data || error.message);
     res.status(500).json({ error: 'Erro ao listar marcas.' });
