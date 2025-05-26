@@ -1,27 +1,22 @@
-function gerarOrdemCompra() {
-  const xml = `
 <pedido>
-  <dados>
-    <pedido>
-      <id_fornecedor>12345</id_fornecedor>
-      <data>${new Date().toISOString().split('T')[0]}</data>
-      <itens>
-        <item>
-          <codigo_produto>ITEM1</codigo_produto>
-          <quantidade>2</quantidade>
-          <valor_unitario>100</valor_unitario>
-        </item>
-        <item>
-          <codigo_produto>ITEM2</codigo_produto>
-          <quantidade>1</quantidade>
-          <valor_unitario>200</valor_unitario>
-        </item>
-      </itens>
-      <total>400</total>
-    </pedido>
-  </dados>
-</pedido>`.trim();
-  return xml;
-}
-
-module.exports = { gerarOrdemCompra };
+  <data_pedido>2025-05-26</data_pedido>
+  <cliente>
+    <codigo>1</codigo>
+    <nome>Cliente Padrão</nome>
+  </cliente>
+  <forma_pagamento>Boleto</forma_pagamento>
+  <condicao_pagamento>A prazo</condicao_pagamento>
+  <transporte>
+    <transportadora>Transportadora X</transportadora>
+    <frete_por_conta>0</frete_por_conta>
+  </transporte>
+  <itens>
+    <item>
+      <codigo>001</codigo>
+      <descricao>Produto A</descricao>
+      <quantidade>1</quantidade>
+      <valor_unitario>10.0</valor_unitario>
+    </item>
+    ...
+  </itens>
+</pedido>
