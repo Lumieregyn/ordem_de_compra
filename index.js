@@ -11,7 +11,7 @@ const port = process.env.PORT || 8080;
 
 let accessToken = null;
 
-// 🔐 Início do fluxo de autenticação
+// 🔐 AUTENTICAÇÃO
 app.get('/auth', (req, res) => {
   console.log('🔍 /auth route hit');
   const clientId = process.env.CLIENT_ID;
@@ -26,7 +26,7 @@ app.get('/auth', (req, res) => {
   res.redirect(authUrl);
 });
 
-// 🔁 Callback da autenticação
+// 🔄 CALLBACK TOKEN
 app.get('/callback', async (req, res) => {
   console.log('📥 /callback route hit');
   const code = req.query.code;
@@ -59,7 +59,7 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// 📦 Enviar Ordem de Compra
+// 📤 ENVIO DE ORDEM DE COMPRA
 app.get('/enviar-oc', async (req, res) => {
   if (!accessToken) {
     return res.send('No access token. Call /auth first.');
@@ -79,15 +79,10 @@ app.get('/enviar-oc', async (req, res) => {
   }
 });
 
-// 🏷️ Listar marcas cadastradas na Tiny
+// 🔎 LISTAR MARCAS USANDO TOKEN ESTÁTICO (TINY_API_TOKEN)
 app.get('/listar-marcas', async (req, res) => {
-  const token = accessToken || process.env.TINY_API_TOKEN;
-
-  if (!token) {
-    return res.status(401).json({ error: 'Token de acesso não encontrado.' });
-  }
-
-  const marcasUnicas = new Set();
+  const token = process.env.TINY_API_TOKEN;
+  const marcas = new Set();
   let pagina = 1;
   let continuar = true;
 
@@ -100,7 +95,7 @@ app.get('/listar-marcas', async (req, res) => {
           params: {
             token,
             formato: 'json',
-            pagina,
+            pagina
           },
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded'
@@ -109,35 +104,29 @@ app.get('/listar-marcas', async (req, res) => {
       );
 
       const produtos = response.data?.retorno?.produtos || [];
-
-      if (pagina === 1) {
-        console.log('🔎 Primeira página recebida:', JSON.stringify(produtos, null, 2));
-      }
-
-      produtos.forEach((p) => {
-        const marca = p.produto?.marca;
-        if (marca) {
-          marcasUnicas.add(marca.trim());
-        }
+      console.log(`🎯 Página ${pagina} com ${produtos.length} produtos.`);
+      produtos.forEach(p => {
+        const marca = p?.produto?.marca;
+        if (marca) marcas.add(marca.trim());
       });
 
-      const ultimaPagina = parseInt(response.data?.retorno?.numero_paginas || 1);
+      const ultimaPagina = response.data?.retorno?.numero_paginas;
       continuar = pagina < ultimaPagina;
       pagina++;
     }
 
     res.json({
-      marcas: Array.from(marcasUnicas).sort(),
-      total: marcasUnicas.size
+      marcas: Array.from(marcas).sort(),
+      total: marcas.size
     });
 
   } catch (error) {
-    console.error('❌ Erro ao buscar marcas:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Erro ao consultar marcas na API da Tiny.' });
+    console.error('❌ Erro ao listar marcas:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Erro ao listar marcas.' });
   }
 });
 
-// 🚀 Start do servidor
+// 🔊 START SERVER
 app.listen(port, () => {
   console.log(`🚀 Servidor rodando na porta ${port}`);
 });
