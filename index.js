@@ -1,4 +1,4 @@
-// Estrutura consolidada do repositório analisado e atualizada com logs detalhados:
+// Estrutura consolidada do repositório analisado e atualizada com logs detalhados e paralelismo:
 
 // index.js
 const express = require('express');
@@ -87,6 +87,7 @@ module.exports = { enviarOrdemCompra };
 // services/pinecone.js
 const axios = require('axios');
 const crypto = require('crypto');
+const pLimit = require('p-limit');
 
 async function inserirMarca(marca) {
   const id = crypto.createHash('md5').update(marca).digest('hex');
@@ -115,6 +116,7 @@ async function listarMarcas(req, res) {
   const marcasEncontradas = new Set();
   let pagina = 1, total = 0, totalProdutos = 0;
   const inicio = Date.now();
+  const limit = pLimit(5);
 
   while (true) {
     const { data } = await axios.get('https://api.tiny.com.br/api2/produtos.pesquisa.php', {
@@ -126,7 +128,7 @@ async function listarMarcas(req, res) {
 
     console.log(`[Página ${pagina}] Processando ${produtos.length} produtos...`);
 
-    for (const p of produtos) {
+    const tarefas = produtos.map(p => limit(async () => {
       totalProdutos++;
       const marca = p.produto.marca;
       if (marca && !marcasEncontradas.has(marca)) {
@@ -135,7 +137,9 @@ async function listarMarcas(req, res) {
         marcasEncontradas.add(marca);
         total++;
       }
-    }
+    }));
+
+    await Promise.all(tarefas);
     pagina++;
   }
 
