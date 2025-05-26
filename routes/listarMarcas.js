@@ -8,7 +8,7 @@ let produtosCollection;
 mongoClient.connect().then(() => {
   const db = mongoClient.db('ordens');
   produtosCollection = db.collection('produtos');
-  console.log('✅ [rotas/listarMarcas] Conectado ao MongoDB');
+  console.log('✅ [listarMarcas.js] Conectado ao MongoDB');
 });
 
 async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
@@ -52,7 +52,7 @@ async function listarMarcas(req, res) {
       const produtos = response.data?.retorno?.produtos || [];
       if (!produtos.length) break;
 
-      let marcasPagina = new Set();
+      const marcasPagina = new Set();
 
       console.log(`[Página ${pagina}] Processando ${produtos.length} produtos...`);
 
@@ -62,8 +62,9 @@ async function listarMarcas(req, res) {
         const nome = p.produto?.nome?.trim();
         let marca = p.produto?.marca?.trim();
 
+        // Fallback: extrair marca do nome
         if (!marca && nome) {
-          const match = nome.match(/^([^-–]+)/); // Extrai até o hífen
+          const match = nome.match(/^([^-–]+)/);
           if (match && match[1]) {
             marca = match[1].trim();
           }
