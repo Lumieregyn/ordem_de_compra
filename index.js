@@ -21,7 +21,6 @@ const mongoClient = new MongoClient(process.env.MONGO_URI, {
   useUnifiedTopology: true
 });
 let produtosCollection;
-
 mongoClient.connect()
   .then(() => {
     produtosCollection = mongoClient.db('ordens').collection('produtos');
@@ -31,12 +30,15 @@ mongoClient.connect()
 
 app.use(express.json());
 
-// ----- OAuth2 (OpenID Connect) para Tiny API v3 -----
-// Pega os scopes do .env e remove possíveis aspas no início/fim
-// No .env defina, por exemplo:
-//   OIDC_SCOPES="openid produtos:read marcas:read offline_access"
-const rawScopes = process.env.OIDC_SCOPES || 'openid';
-const OIDC_SCOPES = rawScopes.replace(/^"+|"+$/g, '');
+/**
+ * OAuth2 (OpenID Connect) para Tiny API v3
+ *  - Defina no seu .env:
+ *      OIDC_SCOPES="openid produtos:read marcas:read offline_access"
+ *  - Ou então omita: teremos fallback para os scopes essenciais.
+ */
+const rawScopes = process.env.OIDC_SCOPES || 'openid produtos:read marcas:read offline_access';
+// Remove aspas & trim
+const OIDC_SCOPES = rawScopes.replace(/^"+|"+$/g, '').trim();
 
 app.get('/auth', (req, res) => {
   const params = new URLSearchParams({
@@ -75,7 +77,7 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// (Opcional) refresh do token
+// (Opcional) renovar refresh token, se quiser
 app.get('/refresh', async (req, res) => {
   const refreshToken = process.env.REFRESH_TOKEN;
   if (!refreshToken) return res.status(400).send('Refresh token ausente');
@@ -100,7 +102,7 @@ app.get('/refresh', async (req, res) => {
   }
 });
 
-// ----- Debug endpoint para inspecionar JSON cru da API v3 -----
+// Debug: inspeciona JSON cru da API v3
 app.get('/test-marca/:id', async (req, res) => {
   const { id } = req.params;
   if (!accessToken) return res.status(401).send('Sem token v3. Chame /auth primeiro.');
@@ -115,7 +117,7 @@ app.get('/test-marca/:id', async (req, res) => {
   }
 });
 
-// ----- Envio de Ordem de Compra -----
+// Envio de Ordem de Compra
 app.post('/enviar-oc', async (req, res) => {
   if (!accessToken) return res.status(401).send('Sem token. Chame /auth primeiro.');
   const dados = req.body || {};
@@ -125,10 +127,10 @@ app.post('/enviar-oc', async (req, res) => {
   res.json(result.data);
 });
 
-// ----- Listar Marcas via API v3 -----
+// Listar Marcas (router separado em ./routes/listarMarcas.js)
 app.get('/listar-marcas', listarMarcas);
 
-// ----- Consulta produto por código -----
+// Consulta produto por código no MongoDB
 app.get('/produto/:codigo', async (req, res) => {
   const { codigo } = req.params;
   if (!codigo) return res.status(400).json({ erro: 'Código é obrigatório' });
@@ -142,7 +144,7 @@ app.get('/produto/:codigo', async (req, res) => {
   }
 });
 
-// ----- Health Check -----
+// Health check
 app.get('/', (req, res) => res.send('API Tiny-Mongo OK'));
 
 app.listen(port, () => console.log(`🚀 Servidor rodando na porta ${port}`));
