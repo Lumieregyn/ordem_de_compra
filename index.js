@@ -113,14 +113,34 @@ app.get('/listar-marcas', async (req, res) => {
         let marca = p.produto?.marca?.trim();
 
         if (!marca && codigo) {
-          const fallback = await axios.post(
-            'https://api.tiny.com.br/api2/produto.obter.php',
+          const pesquisa = await axios.post(
+            'https://api.tiny.com.br/api2/produtos.pesquisa.php',
             null,
             {
               params: { token, formato: 'json', codigo },
               headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
             }
           );
+          const id = pesquisa.data?.retorno?.produtos?.[0]?.produto?.id;
+
+          if (id) {
+            const fallback = await axios.post(
+              'https://api.tiny.com.br/api2/produto.obter.php',
+              null,
+              {
+                params: { token, formato: 'json', id },
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+              }
+            );
+            const fallbackProduto = typeof fallback.data === 'string' ? JSON.parse(fallback.data) : fallback.data;
+            marca = fallbackProduto?.retorno?.produto?.marca?.trim();
+            if (!marca) {
+              console.log(`⚠️ Produto sem marca mesmo após fallback: código ${codigo}`);
+              console.log('📦 Conteúdo do produto:', JSON.stringify(fallbackProduto?.retorno?.produto, null, 2));
+            }
+          } else {
+            console.log(`⚠️ Produto não localizado na pesquisa: código ${codigo}`);
+          }
           const fallbackProduto = typeof fallback.data === 'string' ? JSON.parse(fallback.data) : fallback.data;
           marca = fallbackProduto?.retorno?.produto?.marca?.trim();
           if (!marca) {
