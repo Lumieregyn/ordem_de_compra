@@ -106,7 +106,7 @@ async function listarMarcas(req, res) {
       console.log(`→ Marcas válidas nesta página: ${marcasPagina.size}`);
       totalMarcasValidas += marcasPagina.size;
 
-      if (pagina % 5 === 0) {
+      if (Number(pagina) % 5 === 0) {
         const topTemp = Object.entries(contagemMarcas)
           .sort((a, b) => b[1] - a[1])
           .slice(0, 5)
