@@ -31,7 +31,8 @@ mongoClient.connect()
 app.use(express.json());
 
 // ----- OAuth2 (OpenID Connect) para Tiny API v3 -----
-const OIDC_SCOPES = 'openid';  // ajuste no painel Tiny para incluir produtos:read, marcas:read, etc.
+// Ajuste aqui para incluir leitura de produtos e marcas
+const OIDC_SCOPES = 'openid produtos:read marcas:read';
 
 app.get('/auth', (req, res) => {
   const params = new URLSearchParams({
