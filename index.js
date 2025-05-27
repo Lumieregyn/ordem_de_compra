@@ -1,3 +1,7 @@
+// index.js
+// Arquivo principal do backend Lumiéregyn
+// Inclui: OAuth2 (OpenID Connect) para Tiny API v3, debug de JSON v3, rota /listar-marcas e envio de OC
+
 require('dotenv').config();
 const express = require('express');
 const axios   = require('axios');
@@ -13,8 +17,7 @@ let accessToken = null;
 
 // Conexão com MongoDB
 const mongoClient = new MongoClient(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
+  useNewUrlParser: true, useUnifiedTopology: true
 });
 let produtosCollection;
 
@@ -28,7 +31,7 @@ mongoClient.connect()
 app.use(express.json());
 
 // ----- OAuth2 (OpenID Connect) para Tiny API v3 -----
-const OIDC_SCOPES = 'openid';  // ajuste no painel Tiny se precisar de mais escopos
+const OIDC_SCOPES = 'openid';  // ajuste no painel Tiny para incluir produtos:read, marcas:read, etc.
 
 app.get('/auth', (req, res) => {
   const params = new URLSearchParams({
@@ -67,7 +70,7 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// (Opcional) endpoint de refresh, se salvar o refresh_token em ENV
+// (Opcional) refresh do token
 app.get('/refresh', async (req, res) => {
   const refreshToken = process.env.REFRESH_TOKEN;
   if (!refreshToken) return res.status(400).send('Refresh token ausente');
@@ -92,10 +95,24 @@ app.get('/refresh', async (req, res) => {
   }
 });
 
-// ----- Integração de Ordem de Compra -----
+// ----- Debug endpoint para inspecionar JSON cru da API v3 -----
+app.get('/test-marca/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!accessToken) return res.status(401).send('Sem token v3. Chame /auth primeiro.');
+  try {
+    const resp = await axios.get(
+      `https://erp.tiny.com.br/public-api/v3/produtos/${id}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    return res.json(resp.data);
+  } catch (err) {
+    return res.status(500).json({ error: err.response?.data || err.message });
+  }
+});
+
+// ----- Envio de Ordem de Compra -----
 app.post('/enviar-oc', async (req, res) => {
   if (!accessToken) return res.status(401).send('Sem token. Chame /auth primeiro.');
-  // Recebe dados do cliente no corpo da requisição
   const dados = req.body || {};
   const xml   = gerarOrdemCompra(dados);
   const result = await enviarOrdemCompra(accessToken, xml);
