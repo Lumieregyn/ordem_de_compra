@@ -122,6 +122,9 @@ app.get('/listar-marcas', async (req, res) => {
             }
           );
           marca = fallback.data?.retorno?.produto?.marca?.trim();
+          if (!marca) {
+            console.log(`⚠️ Produto sem marca mesmo após fallback: código ${codigo}`);
+          }
         }
 
         if (codigo && nome && marca) {
