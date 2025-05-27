@@ -124,19 +124,20 @@ app.get('/listar-marcas', async (req, res) => {
           const id = pesquisa.data?.retorno?.produtos?.[0]?.produto?.id;
 
           if (id) {
-            const fallback = await axios.post(
-              'https://api.tiny.com.br/api2/produto.obter.php',
-              null,
+            const fallback = await axios.get(
+              `https://api.tiny.com.br/api/public/v3/produtos/${id}`,
               {
-                params: { token, formato: 'json', id },
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                headers: {
+                  'Authorization': `Bearer ${accessToken}`,
+                  'Content-Type': 'application/json'
+                }
               }
             );
-            const fallbackProduto = typeof fallback.data === 'string' ? JSON.parse(fallback.data) : fallback.data;
-            marca = fallbackProduto?.retorno?.produto?.marca?.nome?.trim();
+            const fallbackProduto = fallback.data;
+            marca = fallbackProduto?.marca?.nome?.trim();
             if (!marca) {
               console.log(`⚠️ Produto sem marca mesmo após fallback: código ${codigo}`);
-              console.log('📦 Conteúdo do produto:', JSON.stringify(fallbackProduto?.retorno?.produto, null, 2));
+              console.log('📦 Conteúdo do produto:', JSON.stringify(fallbackProduto, null, 2));
             }
           } else {
             console.log(`⚠️ Produto não localizado na pesquisa: código ${codigo}`);
