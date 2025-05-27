@@ -4,7 +4,6 @@ const express = require('express');
 const axios = require('axios');
 const qs = require('qs');
 const { MongoClient } = require('mongodb');
-const { gerarOrdemCompra } = require('./services/ocGenerator');
 const { enviarOrdemCompra } = require('./services/enviarOrdem');
 const { listarMarcas } = require('./routes/listarMarcas');
 
