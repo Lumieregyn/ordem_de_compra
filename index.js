@@ -32,10 +32,11 @@ mongoClient.connect()
 app.use(express.json());
 
 // ----- OAuth2 (OpenID Connect) para Tiny API v3 -----
-// Agora pegamos os scopes da variável de ambiente para evitar invalid_scope
-// Defina em seu .env, por exemplo:
+// Pega os scopes do .env e remove possíveis aspas no início/fim
+// No .env defina, por exemplo:
 //   OIDC_SCOPES="openid produtos:read marcas:read offline_access"
-const OIDC_SCOPES = process.env.OIDC_SCOPES || 'openid';
+const rawScopes = process.env.OIDC_SCOPES || 'openid';
+const OIDC_SCOPES = rawScopes.replace(/^"+|"+$/g, '');
 
 app.get('/auth', (req, res) => {
   const params = new URLSearchParams({
@@ -45,7 +46,7 @@ app.get('/auth', (req, res) => {
     scope:        OIDC_SCOPES
   });
   res.redirect(
-    `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?${params}`
+    `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?${params.toString()}`
   );
 });
 
