@@ -21,6 +21,7 @@ const mongoClient = new MongoClient(process.env.MONGO_URI, {
   useUnifiedTopology: true
 });
 let produtosCollection;
+
 mongoClient.connect()
   .then(() => {
     produtosCollection = mongoClient.db('ordens').collection('produtos');
@@ -28,23 +29,24 @@ mongoClient.connect()
   })
   .catch(err => console.error('❌ Erro MongoDB:', err));
 
+// para receber JSON no body
 app.use(express.json());
 
+
 // ----- OAuth2 (OpenID Connect) para Tiny API v3 -----
-const rawScopes = process.env.OIDC_SCOPES || 'openid produtos:read marcas:read offline_access';
-const OIDC_SCOPES = rawScopes.replace(/^"+|"+$/g, '').trim();
+// agora inclui permissão de leitura de produtos e marcas
+const OIDC_SCOPES = 'openid produtos:read marcas:read';
 
 app.get('/auth', (req, res) => {
-  // Montagem manual para garantir que ' ' vire '%20' e não '+'
-  const scopeParam = encodeURIComponent(OIDC_SCOPES);
-  const authUrl = [
-    'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth',
-    `response_type=code`,
-    `client_id=${process.env.CLIENT_ID}`,
-    `redirect_uri=${encodeURIComponent(process.env.REDIRECT_URI)}`,
-    `scope=${scopeParam}`
-  ].join('&');
-  res.redirect(authUrl);
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id:    process.env.CLIENT_ID,
+    redirect_uri: process.env.REDIRECT_URI,
+    scope:        OIDC_SCOPES
+  });
+  res.redirect(
+    `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?${params}`
+  );
 });
 
 app.get('/callback', async (req, res) => {
@@ -97,7 +99,7 @@ app.get('/refresh', async (req, res) => {
   }
 });
 
-// Debug endpoint para inspecionar JSON cru da API v3
+// ----- Debug endpoint para inspecionar JSON cru da API v3 -----
 app.get('/test-marca/:id', async (req, res) => {
   const { id } = req.params;
   if (!accessToken) return res.status(401).send('Sem token v3. Chame /auth primeiro.');
@@ -108,11 +110,12 @@ app.get('/test-marca/:id', async (req, res) => {
     );
     return res.json(resp.data);
   } catch (err) {
+    console.error('❌ /test-marca erro:', err.response?.data || err.message);
     return res.status(500).json({ error: err.response?.data || err.message });
   }
 });
 
-// Envio de Ordem de Compra
+// ----- Envio de Ordem de Compra -----
 app.post('/enviar-oc', async (req, res) => {
   if (!accessToken) return res.status(401).send('Sem token. Chame /auth primeiro.');
   const dados = req.body || {};
@@ -122,10 +125,10 @@ app.post('/enviar-oc', async (req, res) => {
   res.json(result.data);
 });
 
-// Listar Marcas
+// ----- Listar Marcas via API v3 (bulk, sem rate-limit) -----
 app.get('/listar-marcas', listarMarcas);
 
-// Consulta produto por código
+// ----- Consulta produto por código no MongoDB -----
 app.get('/produto/:codigo', async (req, res) => {
   const { codigo } = req.params;
   if (!codigo) return res.status(400).json({ erro: 'Código é obrigatório' });
@@ -139,7 +142,7 @@ app.get('/produto/:codigo', async (req, res) => {
   }
 });
 
-// Health Check
+// ----- Health Check -----
 app.get('/', (req, res) => res.send('API Tiny-Mongo OK'));
 
 app.listen(port, () => console.log(`🚀 Servidor rodando na porta ${port}`));
