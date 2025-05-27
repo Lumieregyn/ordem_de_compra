@@ -4,15 +4,17 @@ const { getProdutosCollection } = require('./mongoClient');
 const { getAccessToken } = require('./tokenService');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
-const API_V2_LIST_URL  = 'https://api.tiny.com.br/api2/produtos.pesquisa.php';
-const API_V2_TOKEN     = process.env.TINY_API_TOKEN;
+const API_V2_LIST_URL = 'https://api.tiny.com.br/api2/produtos.pesquisa.php';
+const API_V2_TOKEN = process.env.TINY_API_TOKEN;
 
 const CONCURRENCY = 1;
 const MAX_RETRIES = 3;
-const BACKOFF_BASE = 1000; // ms
+const BACKOFF_BASE = 1000;
+const MAX_FALLOWS = 10; // novo: máximo de buscas via v3 por execução
 
-const marcasCache = new Map(); // Cache para evitar chamadas duplicadas
+const marcasCache = new Map();
 let chamadasV3 = 0;
+let fallbacksUsados = 0;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -54,13 +56,19 @@ async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
 }
 
 async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
-  if (!codigo || !nome || !marca) return;
+  if (!codigo || !nome) return;
 
   try {
     const collection = getProdutosCollection();
     await collection.updateOne(
       { codigo },
-      { $set: { nome, marca, atualizado_em: new Date().toISOString() } },
+      {
+        $set: {
+          nome,
+          marca: marca || null,
+          atualizado_em: new Date().toISOString()
+        }
+      },
       { upsert: true }
     );
   } catch (err) {
@@ -93,17 +101,23 @@ async function processarProdutosTiny() {
         const { codigo, nome, marca: marcaBruta, id } = produto;
         let marca = marcaBruta?.trim();
 
+        // Se a marca estiver ausente, tentar o fallback (limitado)
         if (!marca && id) {
-          marca = await fetchMarcaV3(id);
+          if (fallbacksUsados >= MAX_FALLOWS) {
+            console.log(`⏳ Fallback v3 ignorado (limite de ${MAX_FALLOWS} atingido) para código: ${codigo}`);
+          } else {
+            marca = await fetchMarcaV3(id);
+            fallbacksUsados++;
+          }
         }
 
         if (!marca) {
           console.log(`❌ Marca ausente para código: ${codigo}`);
-          return;
+        } else {
+          marcasPagina.add(marca);
+          contagemMarcas[marca] = (contagemMarcas[marca] || 0) + 1;
         }
 
-        marcasPagina.add(marca);
-        contagemMarcas[marca] = (contagemMarcas[marca] || 0) + 1;
         await salvarOuAtualizarProduto({ codigo, nome: nome?.trim(), marca });
       })
     );
@@ -120,6 +134,7 @@ async function processarProdutosTiny() {
     marcasSalvas: totalMarcasValidas,
     tempo: duracao + 's',
     chamadasV3,
+    fallbacksUsados,
     topMarcas: Object.entries(contagemMarcas)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
