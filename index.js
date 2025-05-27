@@ -121,7 +121,8 @@ app.get('/listar-marcas', async (req, res) => {
               headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
             }
           );
-          marca = fallback.data?.retorno?.produto?.marca?.trim();
+          const fallbackProduto = typeof fallback.data === 'string' ? JSON.parse(fallback.data) : fallback.data;
+          marca = fallbackProduto?.retorno?.produto?.marca?.trim();
           if (!marca) {
             console.log(`⚠️ Produto sem marca mesmo após fallback: código ${codigo}`);
           }
