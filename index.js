@@ -10,22 +10,22 @@ const pLimit = require('p-limit');
 const { MongoClient } = require('mongodb');
 const { gerarOrdemCompra } = require('./services/ocGenerator');
 const { enviarOrdemCompra } = require('./services/enviarOrdem');
-// Import do handler listarMarcas colocado na raiz do projeto
-const { listarMarcas } = require('./listarMarcas');
+// Import corrigido para a pasta router onde está o listarMarcas.js
+const { listarMarcas } = require('./router/listarMarcas');
 
-// Configurações iniciais
+// Configurações do OAuth2 (OpenID Connect) Tiny API v3
 const tokenSettings = {
   clientId: process.env.CLIENT_ID,
   clientSecret: process.env.CLIENT_SECRET,
   redirectUri: process.env.REDIRECT_URI,
-  scopes: 'openid produtos:read produtos:write marcas:read',
+  scopes: 'openid produtos:read marcas:read produtos:write',
 };
 
 const app = express();
 const port = process.env.PORT || 8080;
 let accessToken = null;
 
-// Conexão com MongoDB
+// Conexão com MongoDB Atlas
 const mongoClient = new MongoClient(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -40,7 +40,7 @@ mongoClient.connect()
   })
   .catch(err => console.error('❌ Erro MongoDB:', err));
 
-// Helper: salvamento/upsert de produto
+// Função helper para upsert de produtos
 async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
   if (!codigo || !nome || !marca) return;
   try {
@@ -50,15 +50,13 @@ async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
       { upsert: true }
     );
   } catch (err) {
-    console.error(`❌ Erro upsert produto ${codigo}:`, err);
+    console.error(`❌ Erro ao salvar produto ${codigo}:`, err);
   }
 }
 
-// Middleware para parsing de JSON
 app.use(express.json());
 
-// ----- Rotas OAuth2 Tiny (v3) -----
-
+// --------- Rotas OAuth2 Tiny API v3 ---------
 app.get('/auth', (req, res) => {
   const { clientId, redirectUri, scopes } = tokenSettings;
   const authUrl =
@@ -87,10 +85,10 @@ app.get('/callback', async (req, res) => {
     );
     accessToken = response.data.access_token;
     process.env.TINY_ACCESS_TOKEN = accessToken;
-    console.log('✅ Token obtido, válido até', response.data.expires_in, 'segundos');
+    console.log(`✅ Token obtido; expira em ${response.data.expires_in}s`);
     res.send('Autenticação concluída com sucesso!');
   } catch (err) {
-    console.error('❌ Erro ao obter token Tiny v3:', err.response?.data || err.message);
+    console.error('❌ Erro ao obter token:', err.response?.data || err.message);
     res.status(500).send('Erro ao obter token');
   }
 });
@@ -111,32 +109,31 @@ app.get('/refresh', async (req, res) => {
     );
     accessToken = response.data.access_token;
     process.env.TINY_ACCESS_TOKEN = accessToken;
-    console.log('🔄 Token renovado, válido até', response.data.expires_in, 'segundos');
+    console.log(`🔄 Token renovado; expira em ${response.data.expires_in}s`);
     res.send('Token renovado com sucesso');
   } catch (err) {
-    console.error('❌ Erro ao renovar token Tiny v3:', err.response?.data || err.message);
+    console.error('❌ Erro ao renovar token:', err.response?.data || err.message);
     res.status(500).send('Erro ao renovar token');
   }
 });
 
-// ----- Integração de Ordem de Compra -----
-
+// --------- Integração de Ordem de Compra ---------
 app.get('/enviar-oc', async (req, res) => {
-  if (!accessToken) return res.status(401).send('Sem token de acesso. Chame /auth primeiro.');
+  if (!accessToken) return res.status(401).send('Sem token. Chame /auth primeiro.');
   try {
     const xml = gerarOrdemCompra();
     await enviarOrdemCompra(accessToken, xml);
     res.send('Ordem de compra enviada com sucesso!');
   } catch (err) {
-    console.error('❌ Erro ao enviar ordem de compra:', err.response?.data || err.message);
-    res.status(500).send('Erro ao enviar ordem de compra');
+    console.error('❌ Erro ao enviar OC:', err.response?.data || err.message);
+    res.status(500).send('Erro ao enviar OC');
   }
 });
 
-// ----- Rota Listar Marcas (Produto) -----
+// --------- Listar Marcas via API v3 ---------
 app.get('/listar-marcas', listarMarcas);
 
-// ----- Endpoint para consulta de produto por código -----
+// --------- Consulta produto por código ---------
 app.get('/produto/:codigo', async (req, res) => {
   const { codigo } = req.params;
   if (!codigo) return res.status(400).json({ erro: 'Código é obrigatório' });
@@ -150,12 +147,8 @@ app.get('/produto/:codigo', async (req, res) => {
   }
 });
 
-// ----- Health Check -----
-app.get('/', (req, res) => {
-  res.send('API Tiny-Mongo OK');
-});
+// --------- Health Check ---------
+app.get('/', (req, res) => res.send('API Tiny-Mongo OK'));
 
 // Inicia servidor
-app.listen(port, () => {
-  console.log(`🚀 Servidor rodando na porta ${port}`);
-});
+app.listen(port, () => console.log(`🚀 Servidor rodando na porta ${port}`));
