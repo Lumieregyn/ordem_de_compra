@@ -10,7 +10,8 @@ const pLimit = require('p-limit');
 const { MongoClient } = require('mongodb');
 const { gerarOrdemCompra } = require('./services/ocGenerator');
 const { enviarOrdemCompra } = require('./services/enviarOrdem');
-const { listarMarcas } = require('./router/listarMarcas'); // ajuste: import correto do handler
+// Import do handler listarMarcas colocado na raiz do projeto
+const { listarMarcas } = require('./listarMarcas');
 
 // Configurações iniciais
 const tokenSettings = {
@@ -133,7 +134,6 @@ app.get('/enviar-oc', async (req, res) => {
 });
 
 // ----- Rota Listar Marcas (Produto) -----
-// Delegada ao arquivo router/listarMarcas.js
 app.get('/listar-marcas', listarMarcas);
 
 // ----- Endpoint para consulta de produto por código -----
