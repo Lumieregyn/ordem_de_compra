@@ -1,7 +1,4 @@
 // index.js
-// Arquivo principal do backend Lumiéregyn
-// Inclui: OAuth2 (OpenID Connect) para Tiny API v3, debug de JSON v3, rota /listar-marcas e envio de OC
-
 require('dotenv').config();
 const express = require('express');
 const axios   = require('axios');
@@ -17,8 +14,7 @@ let accessToken = null;
 
 // Conexão com MongoDB
 const mongoClient = new MongoClient(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
+  useNewUrlParser: true, useUnifiedTopology: true
 });
 let produtosCollection;
 
@@ -29,13 +25,10 @@ mongoClient.connect()
   })
   .catch(err => console.error('❌ Erro MongoDB:', err));
 
-// para receber JSON no body
 app.use(express.json());
 
-
 // ----- OAuth2 (OpenID Connect) para Tiny API v3 -----
-// agora inclui permissão de leitura de produtos e marcas
-const OIDC_SCOPES = 'openid produtos:read marcas:read';
+const OIDC_SCOPES = 'produtos:read marcas:read'; // << escopos corrigidos
 
 app.get('/auth', (req, res) => {
   const params = new URLSearchParams({
@@ -74,7 +67,6 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// (Opcional) refresh do token
 app.get('/refresh', async (req, res) => {
   const refreshToken = process.env.REFRESH_TOKEN;
   if (!refreshToken) return res.status(400).send('Refresh token ausente');
@@ -99,7 +91,7 @@ app.get('/refresh', async (req, res) => {
   }
 });
 
-// ----- Debug endpoint para inspecionar JSON cru da API v3 -----
+// ----- Debug JSON da API v3 -----
 app.get('/test-marca/:id', async (req, res) => {
   const { id } = req.params;
   if (!accessToken) return res.status(401).send('Sem token v3. Chame /auth primeiro.');
@@ -110,12 +102,11 @@ app.get('/test-marca/:id', async (req, res) => {
     );
     return res.json(resp.data);
   } catch (err) {
-    console.error('❌ /test-marca erro:', err.response?.data || err.message);
     return res.status(500).json({ error: err.response?.data || err.message });
   }
 });
 
-// ----- Envio de Ordem de Compra -----
+// ----- Enviar OC -----
 app.post('/enviar-oc', async (req, res) => {
   if (!accessToken) return res.status(401).send('Sem token. Chame /auth primeiro.');
   const dados = req.body || {};
@@ -125,10 +116,14 @@ app.post('/enviar-oc', async (req, res) => {
   res.json(result.data);
 });
 
-// ----- Listar Marcas via API v3 (bulk, sem rate-limit) -----
-app.get('/listar-marcas', listarMarcas);
+// ----- Listar marcas com token atualizado -----
+app.get('/listar-marcas', async (req, res) => {
+  if (!accessToken) return res.status(401).send('Token ausente. Autentique via /auth');
+  process.env.TINY_ACCESS_TOKEN = accessToken; // força atualização
+  return listarMarcas(req, res);
+});
 
-// ----- Consulta produto por código no MongoDB -----
+// ----- Buscar produto salvo -----
 app.get('/produto/:codigo', async (req, res) => {
   const { codigo } = req.params;
   if (!codigo) return res.status(400).json({ erro: 'Código é obrigatório' });
