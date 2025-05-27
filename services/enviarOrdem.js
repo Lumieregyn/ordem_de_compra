@@ -1,30 +1,31 @@
 const axios = require('axios');
-const { gerarOrdemCompra } = require('./ocGenerator');
+const qs    = require('qs');
 
-async function enviarOrdemCompra(token) {
-  const xml = gerarOrdemCompra();
-
+/**
+ * Envia uma ordem de compra (XML) para a Tiny API v2.
+ * @param {string} token — Bearer token ou token v2 da Tiny
+ * @param {string} xml   — XML gerado pelo ocGenerator
+ */
+async function enviarOrdemCompra(token, xml) {
   try {
-    const response = await axios.post(
+    const body = qs.stringify({
+      xml,
+      token,
+      formato: 'json'
+    });
+
+    const resp = await axios.post(
       'https://api.tiny.com.br/api2/pedido.incluir.php',
-      {
-        xml: xml,
-        token: token,
-        formato: 'json',
-      },
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
+      body,
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     );
 
     console.log('✅ Ordem de compra enviada com sucesso!');
-    console.log(response.data);
-    return { success: true, data: response.data };
-  } catch (error) {
-    console.error('❌ Erro ao enviar OC:', error.message);
-    return { success: false, error: error.message };
+    console.log(resp.data);
+    return { success: true, data: resp.data };
+  } catch (err) {
+    console.error('❌ Erro ao enviar OC:', err.response?.data || err.message);
+    return { success: false, error: err.response?.data || err.message };
   }
 }
 
