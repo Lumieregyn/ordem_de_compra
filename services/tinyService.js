@@ -6,28 +6,39 @@ const { getAccessToken } = require('./tokenService');
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 const API_V2_LIST_URL  = 'https://api.tiny.com.br/api2/produtos.pesquisa.php';
 const API_V2_TOKEN     = process.env.TINY_API_TOKEN;
-const CONCURRENCY      = 2;
-const MAX_RETRIES      = 3;
-const BACKOFF_BASE     = 500;
+
+const CONCURRENCY = 1;
+const MAX_RETRIES = 3;
+const BACKOFF_BASE = 1000; // ms
+
+const marcasCache = new Map(); // Cache para evitar chamadas duplicadas
+let chamadasV3 = 0;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
+  if (marcasCache.has(produtoId)) {
+    return marcasCache.get(produtoId);
+  }
+
   const token = getAccessToken();
   if (!token) {
     console.warn('⚠️ TOKEN v3 ausente. Rode /auth → /callback primeiro.');
     return null;
   }
 
+  chamadasV3++;
   try {
     const resp = await axios.get(
       `${TINY_API_V3_BASE}/produtos/${produtoId}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
-    return resp.data.marca?.nome?.trim() || null;
+    const marca = resp.data.marca?.nome?.trim() || null;
+    marcasCache.set(produtoId, marca);
+    return marca;
   } catch (err) {
     const status = err.response?.status;
     if (status === 429 && retries > 0) {
@@ -108,6 +119,7 @@ async function processarProdutosTiny() {
     produtos: totalProdutos,
     marcasSalvas: totalMarcasValidas,
     tempo: duracao + 's',
+    chamadasV3,
     topMarcas: Object.entries(contagemMarcas)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
