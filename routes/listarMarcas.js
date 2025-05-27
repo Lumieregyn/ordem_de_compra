@@ -6,15 +6,15 @@ const pLimit = require('p-limit');
 const { MongoClient } = require('mongodb');
 
 // Configurações
-const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
-const API_V2_LIST_URL = 'https://api.tiny.com.br/api2/produtos.pesquisa.php';
-const API_V2_TOKEN = process.env.TINY_API_TOKEN;
-const CONCURRENCY = 2;
-const MAX_RETRIES = 3;
-const BACKOFF_BASE = 500; // ms
+const TINY_API_V3_BASE  = 'https://erp.tiny.com.br/public-api/v3';
+const API_V2_LIST_URL   = 'https://api.tiny.com.br/api2/produtos.pesquisa.php';
+const API_V2_TOKEN      = process.env.TINY_API_TOKEN;
+const CONCURRENCY       = 2;
+const MAX_RETRIES       = 3;
+const BACKOFF_BASE      = 500; // ms para backoff
 
 // Conexão com MongoDB
-documentNode = new MongoClient(process.env.MONGO_URI, {
+const mongoClient = new MongoClient(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
@@ -27,7 +27,12 @@ mongoClient.connect()
   })
   .catch(err => console.error('❌ [listarMarcas.js] Erro MongoDB:', err));
 
-// Upsert de produto
+// Função utilitária de sleep
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Upsert de produto no MongoDB
 async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
   if (!codigo || !nome || !marca) return;
   try {
@@ -41,16 +46,11 @@ async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
   }
 }
 
-// Sleep util
-def sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Busca marca pela API v3 com retry/backoff
+// Busca de marca via API v3 com retry/backoff em caso de 429
 async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
   const token = process.env.TINY_ACCESS_TOKEN;
   if (!token) {
-    console.warn('⚠️ ACCESS_TOKEN v3 não definido. Passe por /auth → /callback primeiro.');
+    console.warn('⚠️ ACCESS_TOKEN v3 não definido. Chame /auth → /callback primeiro.');
     return null;
   }
   try {
@@ -63,7 +63,7 @@ async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
       console.warn(`⚠️ Resposta sem data para ID ${produtoId}`);
       return null;
     }
-    // Extrai marca de forma genérica
+    // Extrai marca de forma genérica navegando pelo objeto
     function findBrand(obj) {
       if (!obj || typeof obj !== 'object') return null;
       if (obj.marca) {
@@ -96,7 +96,7 @@ async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
   }
 }
 
-// Handler principal
+// Handler principal: itera páginas, busca ID via v2 e marca via v3
 async function listarMarcas(req, res) {
   let pagina = 1;
   let totalProdutos = 0;
@@ -107,35 +107,42 @@ async function listarMarcas(req, res) {
 
   try {
     while (true) {
+      // Listagem base (API v2) para obter IDs e códigos
       const response = await axios.post(API_V2_LIST_URL, null, {
         params: { token: API_V2_TOKEN, formato: 'json', pagina },
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
+
       const produtos = response.data?.retorno?.produtos || [];
       if (!produtos.length) break;
 
       console.log(`[Página ${pagina}] Processando ${produtos.length} produtos...`);
       const marcasPagina = new Set();
 
-      const tarefas = produtos.map(({ produto }) => limit(async () => {
-        totalProdutos++;
-        const codigo = produto.codigo;
-        const nome = produto.nome?.trim();
-        let marca = produto.marca?.trim();
+      const tarefas = produtos.map(({ produto }) =>
+        limit(async () => {
+          totalProdutos++;
+          const codigo = produto.codigo;
+          const nome   = produto.nome?.trim();
+          let marca    = produto.marca?.trim();
 
-        if (!marca && produto.id) {
-          marca = await fetchMarcaV3(produto.id);
-        }
-        if (!marca) {
-          console.log(`❌ Marca ausente para código: ${codigo}`);
-          return;
-        }
-        marcasPagina.add(marca);
-        contagemMarcas[marca] = (contagemMarcas[marca] || 0) + 1;
-        await salvarOuAtualizarProduto({ codigo, nome, marca });
-      }));
+          // Se não veio marca na listagem v2, busca na v3
+          if (!marca && produto.id) {
+            marca = await fetchMarcaV3(produto.id);
+          }
+          if (!marca) {
+            console.log(`❌ Marca ausente para código: ${codigo}`);
+            return;
+          }
+
+          marcasPagina.add(marca);
+          contagemMarcas[marca] = (contagemMarcas[marca] || 0) + 1;
+          await salvarOuAtualizarProduto({ codigo, nome, marca });
+        })
+      );
 
       await Promise.all(tarefas);
+
       console.log(`→ Marcas válidas nesta página: ${marcasPagina.size}`);
       totalMarcasValidas += marcasPagina.size;
 
@@ -157,7 +164,6 @@ async function listarMarcas(req, res) {
     console.log(`🔢 Total de produtos analisados: ${totalProdutos}`);
     console.log(`🏷️ Marcas válidas salvas: ${totalMarcasValidas}`);
     console.log(`🕒 Tempo total: ${duracao}s`);
-
     console.log('📊 Top marcas identificadas:');
     Object.entries(contagemMarcas)
       .sort((a, b) => b[1] - a[1])
@@ -172,6 +178,7 @@ async function listarMarcas(req, res) {
       tempo: duracao + 's',
       topMarcas: contagemMarcas
     });
+
   } catch (error) {
     console.error('❌ Erro ao listar marcas:', error.response?.data || error.message);
     res.status(500).json({ erro: 'Erro ao listar marcas.' });
