@@ -107,10 +107,20 @@ async function listarMarcas(req, res) {
       totalMarcasValidas += marcasPagina.size;
 
       if (Number(pagina) % 5 === 0) {
-        const topTemp = Object.entries(contagemMarcas)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 5)
-          .map(([m, c]) => `• ${m}: ${c}`)
+  console.log(`📊 Top parciais após ${pagina} páginas:`);
+
+  const marcas = Object.entries(contagemMarcas)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  if (marcas.length === 0) {
+    console.log('• (nenhuma marca identificada ainda)');
+  } else {
+    const topTemp = marcas.map(([m, c]) => `• ${m}: ${c}`).join('
+');
+    console.log(topTemp);
+  }
+}: ${c}`)
           .join('\n');
         console.log(`📊 Top parciais após ${pagina} páginas:`);
         console.log(topTemp);
