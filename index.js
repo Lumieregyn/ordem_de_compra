@@ -1,4 +1,4 @@
-// index.js com log de marcas a cada 5 páginas, rota completa embutida
+// index.js atualizado com fallback via API V3 e Bearer Token
 
 require('dotenv').config();
 const express = require('express');
@@ -13,7 +13,6 @@ const app = express();
 const port = process.env.PORT || 8080;
 let accessToken = null;
 
-// MongoDB connection
 const mongoClient = new MongoClient(process.env.MONGO_URI);
 let produtosCollection;
 
@@ -38,7 +37,6 @@ async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
   );
 }
 
-// 🔐 Autenticação Tiny
 app.get('/auth', (req, res) => {
   const clientId = process.env.CLIENT_ID;
   const redirectUri = process.env.REDIRECT_URI;
@@ -49,7 +47,6 @@ app.get('/auth', (req, res) => {
 app.get('/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.send('Erro: código de autorização ausente.');
-
   try {
     const response = await axios.post(
       'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
@@ -69,19 +66,17 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// 📦 Envia OC
 app.get('/enviar-oc', async (req, res) => {
   if (!accessToken) return res.send('No access token. Call /auth first.');
   try {
     const xml = gerarOrdemCompra();
-    const response = await enviarOrdemCompra(accessToken, xml);
+    await enviarOrdemCompra(accessToken, xml);
     res.send('Ordem de compra enviada com sucesso!');
   } catch (error) {
     res.send('Erro ao enviar ordem de compra.');
   }
 });
 
-// 🧠 Listar marcas com log de parciais a cada 5 páginas
 app.get('/listar-marcas', async (req, res) => {
   const token = process.env.TINY_API_TOKEN;
   let pagina = 1;
@@ -112,36 +107,19 @@ app.get('/listar-marcas', async (req, res) => {
         const nome = p.produto?.nome?.trim();
         let marca = p.produto?.marca?.trim();
 
-        if (!marca && codigo) {
+        if (!marca && p.produto?.id) {
           try {
-            const pesquisa = await axios.post(
-              'https://api.tiny.com.br/api2/produtos.pesquisa.php',
-              null,
+            const v3Response = await axios.get(
+              `https://api.tiny.com.br/api/v3/produtos/${p.produto.id}`,
               {
-                params: { token, formato: 'json', codigo },
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                headers: {
+                  Authorization: `Bearer ${accessToken}`
+                }
               }
             );
-            const id = pesquisa.data?.retorno?.produtos?.[0]?.produto?.id;
-
-            if (id) {
-              const detalhe = await axios.get(
-                `https://api.tiny.com.br/api/v3/produtos/${id}`,
-                {
-                  headers: {
-                    Authorization: `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json'
-                  }
-                }
-              );
-              marca = detalhe.data?.marca?.nome?.trim();
-              if (!marca) {
-                console.log(`⚠️ Produto sem marca mesmo após fallback: código ${codigo}`);
-                console.log('📦 Conteúdo do produto:', JSON.stringify(detalhe.data, null, 2));
-              }
-            }
+            marca = v3Response?.data?.marca?.nome?.trim();
           } catch (err) {
-            console.log(`❌ Erro ao buscar marca fallback para ${codigo}:`, err?.response?.status || err.message);
+            console.log(`❌ Erro ao buscar marca fallback para ${codigo}: ${err.response?.status}`);
           }
         }
 
@@ -152,17 +130,14 @@ app.get('/listar-marcas', async (req, res) => {
       }));
 
       await Promise.all(tarefas);
-
       if (pagina % 5 === 0) {
         console.log(`📊 Total de marcas únicas até página ${pagina}: ${Object.keys(contagemMarcas).length}`);
       }
-
       pagina++;
     }
 
     const fim = Date.now();
     const duracao = ((fim - inicio) / 1000).toFixed(1);
-
     console.log(`✅ Concluído: ${pagina - 1} páginas processadas`);
     console.log(`🔢 Total de produtos analisados: ${totalProdutos}`);
     console.log(`🏷️ Marcas únicas identificadas: ${Object.keys(contagemMarcas).length}`);
@@ -176,12 +151,10 @@ app.get('/listar-marcas', async (req, res) => {
       marcasUnicas: Object.keys(contagemMarcas).length
     });
   } catch (error) {
-    console.error('Erro em listar-marcas:', error.response?.data || error.message);
     res.status(500).json({ erro: 'Erro ao listar marcas.' });
   }
 });
 
-// 🔍 Buscar produto por código
 app.get('/produto/:codigo', async (req, res) => {
   const codigo = req.params.codigo;
   if (!codigo) return res.status(400).json({ erro: 'Código é obrigatório' });
@@ -194,7 +167,6 @@ app.get('/produto/:codigo', async (req, res) => {
   }
 });
 
-// 🚀 Inicializa servidor
 app.listen(port, () => {
   console.log(`🚀 Servidor rodando na porta ${port}`);
 });
