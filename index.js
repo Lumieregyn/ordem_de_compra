@@ -1,52 +1,34 @@
-// index.js
-// Arquivo principal do backend Lumiéregyn
-// Inclui: OAuth2 (OpenID Connect) para Tiny API v3, rota /listar-marcas usando API v3, e endpoints de produto e OC
+require('dotenv').config();
+const express = require('express');
+const axios   = require('axios');
+const qs      = require('qs');
+const { MongoClient } = require('mongodb');
+const { gerarOrdemCompra } = require('./services/ocGenerator');
+const { enviarOrdemCompra } = require('./services/enviarOrdem');
+const { listarMarcas }      = require('./routes/listarMarcas');
 
-require('dotenv').config()
-const express = require('express')
-const axios = require('axios')
-const qs = require('qs')
-const { MongoClient } = require('mongodb')
-const { gerarOrdemCompra } = require('./services/ocGenerator')
-const { enviarOrdemCompra } = require('./services/enviarOrdem')
-const { listarMarcas }    = require('./routes/listarMarcas')
+const app = express();
+const port = process.env.PORT || 8080;
+let accessToken = null;
 
-const app = express()
-const port = process.env.PORT || 8080
-let accessToken = null
-
-// Conexão com MongoDB Atlas
+// Conexão com MongoDB
 const mongoClient = new MongoClient(process.env.MONGO_URI, {
-  useNewUrlParser: true, useUnifiedTopology: true
-})
-let produtosCollection
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+});
+let produtosCollection;
+
 mongoClient.connect()
   .then(() => {
-    produtosCollection = mongoClient.db('ordens').collection('produtos')
-    console.log('✅ Conectado ao MongoDB')
+    produtosCollection = mongoClient.db('ordens').collection('produtos');
+    console.log('✅ Conectado ao MongoDB');
   })
-  .catch(err => console.error('❌ Erro MongoDB:', err))
+  .catch(err => console.error('❌ Erro MongoDB:', err));
 
-// Helper: salvamento/upsert de produto
-async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
-  if (!codigo || !nome || !marca) return
-  try {
-    await produtosCollection.updateOne(
-      { codigo },
-      { $set: { nome, marca, atualizado_em: new Date() } },
-      { upsert: true }
-    )
-  } catch (err) {
-    console.error(`❌ Erro ao salvar produto ${codigo}:`, err)
-  }
-}
-
-app.use(express.json())
+app.use(express.json());
 
 // ----- OAuth2 (OpenID Connect) para Tiny API v3 -----
-
-// Ajuste aqui apenas "openid"
-const OIDC_SCOPES = 'openid'
+const OIDC_SCOPES = 'openid';  // ajuste no painel Tiny se precisar de mais escopos
 
 app.get('/auth', (req, res) => {
   const params = new URLSearchParams({
@@ -54,14 +36,15 @@ app.get('/auth', (req, res) => {
     client_id:    process.env.CLIENT_ID,
     redirect_uri: process.env.REDIRECT_URI,
     scope:        OIDC_SCOPES
-  })
-  const url = `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?${params}`
-  res.redirect(url)
-})
+  });
+  res.redirect(
+    `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?${params}`
+  );
+});
 
 app.get('/callback', async (req, res) => {
-  const code = req.query.code
-  if (!code) return res.status(400).send('Código de autorização ausente')
+  const code = req.query.code;
+  if (!code) return res.status(400).send('Código de autorização ausente');
   try {
     const resp = await axios.post(
       'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
@@ -73,21 +56,21 @@ app.get('/callback', async (req, res) => {
         redirect_uri:  process.env.REDIRECT_URI
       }),
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    )
-    accessToken = resp.data.access_token
-    process.env.TINY_ACCESS_TOKEN = accessToken
-    console.log(`✅ Token obtido; expira em ${resp.data.expires_in}s`)
-    res.send('Autenticação concluída com sucesso!')
+    );
+    accessToken = resp.data.access_token;
+    process.env.TINY_ACCESS_TOKEN = accessToken;
+    console.log(`✅ Token obtido; expira em ${resp.data.expires_in}s`);
+    res.send('Autenticação concluída com sucesso!');
   } catch (err) {
-    console.error('❌ Erro ao obter token:', err.response?.data || err.message)
-    res.status(500).send('Erro ao obter token')
+    console.error('❌ Erro ao obter token:', err.response?.data || err.message);
+    res.status(500).send('Erro ao obter token');
   }
-})
+});
 
-// (Opcional) Renova via refresh_token se você gravar esse token em ENV
+// (Opcional) endpoint de refresh, se salvar o refresh_token em ENV
 app.get('/refresh', async (req, res) => {
-  const refreshToken = process.env.REFRESH_TOKEN
-  if (!refreshToken) return res.status(400).send('Refresh token ausente')
+  const refreshToken = process.env.REFRESH_TOKEN;
+  if (!refreshToken) return res.status(400).send('Refresh token ausente');
   try {
     const resp = await axios.post(
       'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
@@ -98,48 +81,46 @@ app.get('/refresh', async (req, res) => {
         client_secret: process.env.CLIENT_SECRET
       }),
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    )
-    accessToken = resp.data.access_token
-    process.env.TINY_ACCESS_TOKEN = accessToken
-    console.log(`🔄 Token renovado; expira em ${resp.data.expires_in}s`)
-    res.send('Token renovado com sucesso')
+    );
+    accessToken = resp.data.access_token;
+    process.env.TINY_ACCESS_TOKEN = accessToken;
+    console.log(`🔄 Token renovado; expira em ${resp.data.expires_in}s`);
+    res.send('Token renovado com sucesso');
   } catch (err) {
-    console.error('❌ Erro ao renovar token:', err.response?.data || err.message)
-    res.status(500).send('Erro ao renovar token')
+    console.error('❌ Erro ao renovar token:', err.response?.data || err.message);
+    res.status(500).send('Erro ao renovar token');
   }
-})
+});
 
 // ----- Integração de Ordem de Compra -----
-app.get('/enviar-oc', async (req, res) => {
-  if (!accessToken) return res.status(401).send('Sem token. Chame /auth primeiro.')
-  try {
-    const xml = gerarOrdemCompra()
-    await enviarOrdemCompra(accessToken, xml)
-    res.send('Ordem de compra enviada com sucesso!')
-  } catch (err) {
-    console.error('❌ Erro ao enviar OC:', err.response?.data || err.message)
-    res.status(500).send('Erro ao enviar OC')
-  }
-})
+app.post('/enviar-oc', async (req, res) => {
+  if (!accessToken) return res.status(401).send('Sem token. Chame /auth primeiro.');
+  // Recebe dados do cliente no corpo da requisição
+  const dados = req.body || {};
+  const xml   = gerarOrdemCompra(dados);
+  const result = await enviarOrdemCompra(accessToken, xml);
+  if (!result.success) return res.status(500).json({ erro: result.error });
+  res.json(result.data);
+});
 
 // ----- Listar Marcas via API v3 -----
-app.get('/listar-marcas', listarMarcas)
+app.get('/listar-marcas', listarMarcas);
 
 // ----- Consulta produto por código -----
 app.get('/produto/:codigo', async (req, res) => {
-  const { codigo } = req.params
-  if (!codigo) return res.status(400).json({ erro: 'Código é obrigatório' })
+  const { codigo } = req.params;
+  if (!codigo) return res.status(400).json({ erro: 'Código é obrigatório' });
   try {
-    const produto = await produtosCollection.findOne({ codigo })
-    if (!produto) return res.status(404).json({ erro: 'Produto não encontrado' })
-    res.json(produto)
+    const produto = await produtosCollection.findOne({ codigo });
+    if (!produto) return res.status(404).json({ erro: 'Produto não encontrado' });
+    res.json(produto);
   } catch (err) {
-    console.error('❌ Erro ao buscar produto:', err)
-    res.status(500).json({ erro: 'Erro interno ao buscar produto' })
+    console.error('❌ Erro ao buscar produto:', err);
+    res.status(500).json({ erro: 'Erro interno ao buscar produto' });
   }
-})
+});
 
 // ----- Health Check -----
-app.get('/', (req, res) => res.send('API Tiny-Mongo OK'))
+app.get('/', (req, res) => res.send('API Tiny-Mongo OK'));
 
-app.listen(port, () => console.log(`🚀 Servidor rodando na porta ${port}`))
+app.listen(port, () => console.log(`🚀 Servidor rodando na porta ${port}`));
