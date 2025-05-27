@@ -1,4 +1,4 @@
-// Estrutura atualizada — marca só da API produto.obter.php, sem fallback por nome, com contagem em tempo real por marca
+// Estrutura atualizada com feedback em tempo real por marca e resumo a cada X páginas
 
 const axios = require('axios');
 const pLimit = require('p-limit');
@@ -105,6 +105,17 @@ async function listarMarcas(req, res) {
 
       console.log(`→ Marcas válidas nesta página: ${marcasPagina.size}`);
       totalMarcasValidas += marcasPagina.size;
+
+      if (pagina % 5 === 0) {
+        const topTemp = Object.entries(contagemMarcas)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([m, c]) => `• ${m}: ${c}`)
+          .join('\n');
+        console.log(`📊 Top parciais após ${pagina} páginas:`);
+        console.log(topTemp);
+      }
+
       pagina++;
     }
 
