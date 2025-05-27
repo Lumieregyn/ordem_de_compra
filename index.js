@@ -10,8 +10,8 @@ const pLimit = require('p-limit');
 const { MongoClient } = require('mongodb');
 const { gerarOrdemCompra } = require('./services/ocGenerator');
 const { enviarOrdemCompra } = require('./services/enviarOrdem');
-// Import corrigido para a pasta router onde está o listarMarcas.js
-const { listarMarcas } = require('./router/listarMarcas');
+// Import do handler listarMarcas deve apontar para pasta 'routes'
+const { listarMarcas } = require('./routes/listarMarcas');
 
 // Configurações do OAuth2 (OpenID Connect) Tiny API v3
 const tokenSettings = {
