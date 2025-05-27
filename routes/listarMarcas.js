@@ -1,4 +1,4 @@
-// Estrutura atualizada — fallback real usando produto.obter.php para obter marca
+// Estrutura atualizada — marca só da API produto.obter.php, sem fallback por nome
 
 const axios = require('axios');
 const pLimit = require('p-limit');
@@ -44,6 +44,7 @@ async function obterMarcaPorCodigo(codigo, token) {
     );
     return data?.retorno?.produto?.marca?.trim() || null;
   } catch (err) {
+    console.warn(`⚠️ Falha ao obter marca para código: ${codigo}`);
     return null;
   }
 }
@@ -52,7 +53,7 @@ async function listarMarcas(req, res) {
   const token = process.env.TINY_API_TOKEN;
   let pagina = 1;
   let totalProdutos = 0;
-  let totalMarcasUnicas = 0;
+  let totalMarcasValidas = 0;
   const inicio = Date.now();
   const limit = pLimit(5);
 
@@ -74,7 +75,7 @@ async function listarMarcas(req, res) {
       const produtos = response.data?.retorno?.produtos || [];
       if (!produtos.length) break;
 
-      const marcasPagina = new Set();
+      let marcasPagina = new Set();
 
       console.log(`[Página ${pagina}] Processando ${produtos.length} produtos...`);
 
@@ -82,22 +83,26 @@ async function listarMarcas(req, res) {
         totalProdutos++;
         const codigo = p.produto?.codigo;
         const nome = p.produto?.nome?.trim();
+
         let marca = p.produto?.marca?.trim();
 
         if (!marca && codigo) {
           marca = await obterMarcaPorCodigo(codigo, token);
         }
 
-        if (codigo && nome && marca) {
-          marcasPagina.add(marca);
-          await salvarOuAtualizarProduto({ codigo, nome, marca });
+        if (!marca) {
+          console.log(`❌ Marca ausente para código: ${codigo}`);
+          return;
         }
+
+        marcasPagina.add(marca);
+        await salvarOuAtualizarProduto({ codigo, nome, marca });
       }));
 
       await Promise.all(tarefas);
 
-      console.log(`→ Marcas únicas nesta página: ${marcasPagina.size}`);
-      totalMarcasUnicas += marcasPagina.size;
+      console.log(`→ Marcas válidas nesta página: ${marcasPagina.size}`);
+      totalMarcasValidas += marcasPagina.size;
       pagina++;
     }
 
@@ -106,14 +111,14 @@ async function listarMarcas(req, res) {
 
     console.log(`✅ Concluído: ${pagina - 1} páginas processadas`);
     console.log(`🔢 Total de produtos analisados: ${totalProdutos}`);
-    console.log(`🏷️ Marcas únicas identificadas: ${totalMarcasUnicas}`);
+    console.log(`🏷️ Marcas válidas salvas: ${totalMarcasValidas}`);
     console.log(`🕒 Tempo total: ${duracao} segundos`);
 
     res.json({
       sucesso: true,
       paginas: pagina - 1,
       produtos: totalProdutos,
-      marcasUnicas: totalMarcasUnicas,
+      marcasSalvas: totalMarcasValidas,
       tempo: duracao + 's'
     });
   } catch (error) {
