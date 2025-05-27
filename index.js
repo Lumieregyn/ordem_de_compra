@@ -17,7 +17,8 @@ let accessToken = null;
 
 // Conexão com MongoDB
 const mongoClient = new MongoClient(process.env.MONGO_URI, {
-  useNewUrlParser: true, useUnifiedTopology: true
+  useNewUrlParser: true,
+  useUnifiedTopology: true
 });
 let produtosCollection;
 
@@ -31,8 +32,10 @@ mongoClient.connect()
 app.use(express.json());
 
 // ----- OAuth2 (OpenID Connect) para Tiny API v3 -----
-// Ajuste aqui para incluir leitura de produtos e marcas
-const OIDC_SCOPES = 'openid produtos:read marcas:read';
+// Agora pegamos os scopes da variável de ambiente para evitar invalid_scope
+// Defina em seu .env, por exemplo:
+//   OIDC_SCOPES="openid produtos:read marcas:read offline_access"
+const OIDC_SCOPES = process.env.OIDC_SCOPES || 'openid';
 
 app.get('/auth', (req, res) => {
   const params = new URLSearchParams({
