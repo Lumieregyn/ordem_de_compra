@@ -1,4 +1,4 @@
-// index.js com fallback REST V3 Tiny e log de marcas a cada 5 páginas
+// index.js com log de marcas a cada 5 páginas, rota completa embutida
 
 require('dotenv').config();
 const express = require('express');
@@ -13,6 +13,7 @@ const app = express();
 const port = process.env.PORT || 8080;
 let accessToken = null;
 
+// MongoDB connection
 const mongoClient = new MongoClient(process.env.MONGO_URI);
 let produtosCollection;
 
@@ -37,6 +38,7 @@ async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
   );
 }
 
+// 🔐 Autenticação Tiny
 app.get('/auth', (req, res) => {
   const clientId = process.env.CLIENT_ID;
   const redirectUri = process.env.REDIRECT_URI;
@@ -47,6 +49,7 @@ app.get('/auth', (req, res) => {
 app.get('/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.send('Erro: código de autorização ausente.');
+
   try {
     const response = await axios.post(
       'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
@@ -66,6 +69,7 @@ app.get('/callback', async (req, res) => {
   }
 });
 
+// 📦 Envia OC
 app.get('/enviar-oc', async (req, res) => {
   if (!accessToken) return res.send('No access token. Call /auth first.');
   try {
@@ -77,6 +81,7 @@ app.get('/enviar-oc', async (req, res) => {
   }
 });
 
+// 🧠 Listar marcas com log de parciais a cada 5 páginas
 app.get('/listar-marcas', async (req, res) => {
   const token = process.env.TINY_API_TOKEN;
   let pagina = 1;
@@ -108,25 +113,35 @@ app.get('/listar-marcas', async (req, res) => {
         let marca = p.produto?.marca?.trim();
 
         if (!marca && codigo) {
-          const pesquisa = await axios.post(
-            'https://api.tiny.com.br/api2/produtos.pesquisa.php',
-            null,
-            {
-              params: { token, formato: 'json', codigo },
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-            }
-          );
-          const id = pesquisa.data?.retorno?.produtos?.[0]?.produto?.id;
+          try {
+            const pesquisa = await axios.post(
+              'https://api.tiny.com.br/api2/produtos.pesquisa.php',
+              null,
+              {
+                params: { token, formato: 'json', codigo },
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+              }
+            );
+            const id = pesquisa.data?.retorno?.produtos?.[0]?.produto?.id;
 
-          if (id && accessToken) {
-            const rest = await axios.get(`https://api.tiny.com.br/api/v3/produtos/${id}`,
-              { headers: { Authorization: `Bearer ${accessToken}` } });
-            marca = rest.data?.marca?.nome?.trim();
-
-            if (!marca) {
-              console.log(`⚠️ Produto sem marca mesmo após fallback REST: código ${codigo}`);
-              console.log('📦 Conteúdo REST V3:', JSON.stringify(rest.data, null, 2));
+            if (id) {
+              const detalhe = await axios.get(
+                `https://api.tiny.com.br/api/v3/produtos/${id}`,
+                {
+                  headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                  }
+                }
+              );
+              marca = detalhe.data?.marca?.nome?.trim();
+              if (!marca) {
+                console.log(`⚠️ Produto sem marca mesmo após fallback: código ${codigo}`);
+                console.log('📦 Conteúdo do produto:', JSON.stringify(detalhe.data, null, 2));
+              }
             }
+          } catch (err) {
+            console.log(`❌ Erro ao buscar marca fallback para ${codigo}:`, err?.response?.status || err.message);
           }
         }
 
@@ -161,11 +176,12 @@ app.get('/listar-marcas', async (req, res) => {
       marcasUnicas: Object.keys(contagemMarcas).length
     });
   } catch (error) {
-    console.error('Erro em listar-marcas:', error?.response?.data || error.message);
+    console.error('Erro em listar-marcas:', error.response?.data || error.message);
     res.status(500).json({ erro: 'Erro ao listar marcas.' });
   }
 });
 
+// 🔍 Buscar produto por código
 app.get('/produto/:codigo', async (req, res) => {
   const codigo = req.params.codigo;
   if (!codigo) return res.status(400).json({ erro: 'Código é obrigatório' });
@@ -178,6 +194,7 @@ app.get('/produto/:codigo', async (req, res) => {
   }
 });
 
+// 🚀 Inicializa servidor
 app.listen(port, () => {
   console.log(`🚀 Servidor rodando na porta ${port}`);
 });
