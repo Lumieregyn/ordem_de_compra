@@ -1,4 +1,4 @@
-// Estrutura atualizada — marca só da API produto.obter.php, sem fallback por nome
+// Estrutura atualizada — marca só da API produto.obter.php, sem fallback por nome, com contagem em tempo real por marca
 
 const axios = require('axios');
 const pLimit = require('p-limit');
@@ -56,6 +56,7 @@ async function listarMarcas(req, res) {
   let totalMarcasValidas = 0;
   const inicio = Date.now();
   const limit = pLimit(5);
+  const contagemMarcas = {};
 
   try {
     while (true) {
@@ -96,6 +97,7 @@ async function listarMarcas(req, res) {
         }
 
         marcasPagina.add(marca);
+        contagemMarcas[marca] = (contagemMarcas[marca] || 0) + 1;
         await salvarOuAtualizarProduto({ codigo, nome, marca });
       }));
 
@@ -114,12 +116,22 @@ async function listarMarcas(req, res) {
     console.log(`🏷️ Marcas válidas salvas: ${totalMarcasValidas}`);
     console.log(`🕒 Tempo total: ${duracao} segundos`);
 
+    const topMarcas = Object.entries(contagemMarcas)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([marca, count]) => `• ${marca}: ${count}`)
+      .join('\n');
+
+    console.log('📊 Top marcas identificadas:');
+    console.log(topMarcas);
+
     res.json({
       sucesso: true,
       paginas: pagina - 1,
       produtos: totalProdutos,
       marcasSalvas: totalMarcasValidas,
-      tempo: duracao + 's'
+      tempo: duracao + 's',
+      topMarcas: contagemMarcas
     });
   } catch (error) {
     console.error('❌ Erro ao listar marcas:', error.response?.data || error.message);
