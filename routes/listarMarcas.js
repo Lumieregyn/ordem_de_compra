@@ -1,9 +1,15 @@
-// Estrutura atualizada com feedback em tempo real por marca e resumo a cada X páginas
+// listarMarcas.js
+// Versão atualizada para usar API v3 da Tiny e extrair marca via Bearer token
 
 const axios = require('axios');
 const pLimit = require('p-limit');
 const { MongoClient } = require('mongodb');
 
+// Constants para Tiny API v3
+const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
+const ACCESS_TOKEN = process.env.TINY_ACCESS_TOKEN;  // gerado via OpenID Connect
+
+// Conexão com MongoDB
 const mongoClient = new MongoClient(process.env.MONGO_URI);
 let produtosCollection;
 
@@ -13,6 +19,7 @@ mongoClient.connect().then(() => {
   console.log('✅ [listarMarcas.js] Conectado ao MongoDB');
 });
 
+// Função para salvar ou atualizar documento no MongoDB
 async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
   if (!codigo || !nome || !marca) return;
   await produtosCollection.updateOne(
@@ -21,36 +28,37 @@ async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
       $set: {
         nome,
         marca,
-        atualizado_em: new Date().toISOString()
-      }
+        atualizado_em: new Date().toISOString(),
+      },
     },
     { upsert: true }
   );
 }
 
-async function obterMarcaPorCodigo(codigo, token) {
+// Função que busca a marca diretamente na API v3
+async function fetchMarcaV3(produtoId) {
   try {
-    const { data } = await axios.post(
-      'https://api.tiny.com.br/api2/produto.obter.php',
-      null,
+    const resp = await axios.get(
+      `${TINY_API_V3_BASE}/produtos/${produtoId}`,
       {
-        params: {
-          token,
-          formato: 'json',
-          codigo
+        headers: {
+          Authorization: `Bearer ${ACCESS_TOKEN}`,
+          'Content-Type': 'application/json',
         },
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       }
     );
-    return data?.retorno?.produto?.marca?.trim() || null;
+    // Estrutura esperada: { data: { data: { marca: { nome: "..." }, ... } } }
+    const nomeMarca = resp.data?.data?.marca?.nome;
+    return nomeMarca?.trim() || null;
   } catch (err) {
-    console.warn(`⚠️ Falha ao obter marca para código: ${codigo}`);
+    const status = err.response?.status;
+    console.warn(`⚠️ Falha ao obter marca V3 para ID ${produtoId}: ${status}`);
     return null;
   }
 }
 
 async function listarMarcas(req, res) {
-  const token = process.env.TINY_API_TOKEN;
+  const tokenV2 = process.env.TINY_API_TOKEN; // ainda usado para pesquisa v2
   let pagina = 1;
   let totalProdutos = 0;
   let totalMarcasValidas = 0;
@@ -60,70 +68,67 @@ async function listarMarcas(req, res) {
 
   try {
     while (true) {
+      // Listagem de produtos (API v2)
       const response = await axios.post(
         'https://api.tiny.com.br/api2/produtos.pesquisa.php',
         null,
         {
           params: {
-            token,
+            token: tokenV2,
             formato: 'json',
-            pagina
+            pagina,
           },
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         }
       );
 
       const produtos = response.data?.retorno?.produtos || [];
       if (!produtos.length) break;
 
-      let marcasPagina = new Set();
-
+      const marcasPagina = new Set();
       console.log(`[Página ${pagina}] Processando ${produtos.length} produtos...`);
 
-      const tarefas = produtos.map(p => limit(async () => {
-        totalProdutos++;
-        const codigo = p.produto?.codigo;
-        const nome = p.produto?.nome?.trim();
+      // Processamento concorrente com limite
+      const tarefas = produtos.map((p) =>
+        limit(async () => {
+          totalProdutos++;
+          const item = p.produto || {};
+          const codigo = item.codigo;
+          const nome = item.nome?.trim();
 
-        let marca = p.produto?.marca?.trim();
+          // Tenta marca já vinda na listagem v2
+          let marca = item.marca?.trim();
 
-        if (!marca && codigo) {
-          marca = await obterMarcaPorCodigo(codigo, token);
-        }
+          // Se não vier, busca via API v3 usando o ID retornado pela v2
+          if (!marca && item.id) {
+            marca = await fetchMarcaV3(item.id);
+          }
 
-        if (!marca) {
-          console.log(`❌ Marca ausente para código: ${codigo}`);
-          return;
-        }
+          if (!marca) {
+            console.log(`❌ Marca ausente para código: ${codigo}`);
+            return;
+          }
 
-        marcasPagina.add(marca);
-        contagemMarcas[marca] = (contagemMarcas[marca] || 0) + 1;
-        await salvarOuAtualizarProduto({ codigo, nome, marca });
-      }));
+          marcasPagina.add(marca);
+          contagemMarcas[marca] = (contagemMarcas[marca] || 0) + 1;
+          await salvarOuAtualizarProduto({ codigo, nome, marca });
+        })
+      );
 
       await Promise.all(tarefas);
 
       console.log(`→ Marcas válidas nesta página: ${marcasPagina.size}`);
       totalMarcasValidas += marcasPagina.size;
 
-      if (Number(pagina) % 5 === 0) {
-  console.log(`📊 Top parciais após ${pagina} páginas:`);
-
-  const marcas = Object.entries(contagemMarcas)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
-
-  if (marcas.length === 0) {
-    console.log('• (nenhuma marca identificada ainda)');
-  } else {
-    const topTemp = marcas.map(([m, c]) => `• ${m}: ${c}`).join('
-');
-    console.log(topTemp);
-  }
-}: ${c}`)
-          .join('\n');
+      // Relatório parcial a cada 5 páginas
+      if (pagina % 5 === 0) {
         console.log(`📊 Top parciais após ${pagina} páginas:`);
-        console.log(topTemp);
+        const top = Object.entries(contagemMarcas)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([m, c]) => `• ${m}: ${c}`)
+          .join('\n');
+        console.log(top || '• (nenhuma marca identificada ainda)');
       }
 
       pagina++;
@@ -135,12 +140,12 @@ async function listarMarcas(req, res) {
     console.log(`✅ Concluído: ${pagina - 1} páginas processadas`);
     console.log(`🔢 Total de produtos analisados: ${totalProdutos}`);
     console.log(`🏷️ Marcas válidas salvas: ${totalMarcasValidas}`);
-    console.log(`🕒 Tempo total: ${duracao} segundos`);
+    console.log(`🕒 Tempo total: ${duracao}s`);
 
     const topMarcas = Object.entries(contagemMarcas)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
-      .map(([marca, count]) => `• ${marca}: ${count}`)
+      .map(([m, c]) => `• ${m}: ${c}`)
       .join('\n');
 
     console.log('📊 Top marcas identificadas:');
@@ -152,7 +157,7 @@ async function listarMarcas(req, res) {
       produtos: totalProdutos,
       marcasSalvas: totalMarcasValidas,
       tempo: duracao + 's',
-      topMarcas: contagemMarcas
+      topMarcas: contagemMarcas,
     });
   } catch (error) {
     console.error('❌ Erro ao listar marcas:', error.response?.data || error.message);
