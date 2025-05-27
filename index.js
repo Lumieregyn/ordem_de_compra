@@ -6,19 +6,10 @@ require('dotenv').config()
 const express = require('express')
 const axios = require('axios')
 const qs = require('qs')
-const pLimit = require('p-limit')
 const { MongoClient } = require('mongodb')
 const { gerarOrdemCompra } = require('./services/ocGenerator')
 const { enviarOrdemCompra } = require('./services/enviarOrdem')
-const { listarMarcas } = require('./routes/listarMarcas')  // handler para /listar-marcas
-
-// Configurações do OAuth2 (OpenID Connect) Tiny API v3
-const tokenSettings = {
-  clientId: process.env.CLIENT_ID,
-  clientSecret: process.env.CLIENT_SECRET,
-  redirectUri: process.env.REDIRECT_URI,
-  scopes: 'openid produtos:read marcas:read produtos:write'
-}
+const { listarMarcas }    = require('./routes/listarMarcas')
 
 const app = express()
 const port = process.env.PORT || 8080
@@ -26,15 +17,12 @@ let accessToken = null
 
 // Conexão com MongoDB Atlas
 const mongoClient = new MongoClient(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
+  useNewUrlParser: true, useUnifiedTopology: true
 })
 let produtosCollection
-
 mongoClient.connect()
   .then(() => {
-    const db = mongoClient.db('ordens')
-    produtosCollection = db.collection('produtos')
+    produtosCollection = mongoClient.db('ordens').collection('produtos')
     console.log('✅ Conectado ao MongoDB')
   })
   .catch(err => console.error('❌ Erro MongoDB:', err))
@@ -53,42 +41,42 @@ async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
   }
 }
 
-// Para parsing de JSON em corpo de requisições, se necessário no futuro
 app.use(express.json())
 
-// --------- Rotas OAuth2 Tiny API v3 ---------
+// ----- OAuth2 (OpenID Connect) para Tiny API v3 -----
 
-// Inicia fluxo de autorização
+// Ajuste aqui apenas "openid"
+const OIDC_SCOPES = 'openid'
+
 app.get('/auth', (req, res) => {
-  const { clientId, redirectUri, scopes } = tokenSettings
-  const authUrl =
-    `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth` +
-    `?response_type=code` +
-    `&client_id=${encodeURIComponent(clientId)}` +
-    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-    `&scope=${encodeURIComponent(scopes)}`
-  res.redirect(authUrl)
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id:    process.env.CLIENT_ID,
+    redirect_uri: process.env.REDIRECT_URI,
+    scope:        OIDC_SCOPES
+  })
+  const url = `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?${params}`
+  res.redirect(url)
 })
 
-// Callback após login no Tiny
 app.get('/callback', async (req, res) => {
   const code = req.query.code
   if (!code) return res.status(400).send('Código de autorização ausente')
   try {
-    const response = await axios.post(
+    const resp = await axios.post(
       'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
       qs.stringify({
-        grant_type: 'authorization_code',
+        grant_type:    'authorization_code',
         code,
-        client_id: tokenSettings.clientId,
-        client_secret: tokenSettings.clientSecret,
-        redirect_uri: tokenSettings.redirectUri
+        client_id:     process.env.CLIENT_ID,
+        client_secret: process.env.CLIENT_SECRET,
+        redirect_uri:  process.env.REDIRECT_URI
       }),
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     )
-    accessToken = response.data.access_token
+    accessToken = resp.data.access_token
     process.env.TINY_ACCESS_TOKEN = accessToken
-    console.log(`✅ Token obtido; expira em ${response.data.expires_in}s`)
+    console.log(`✅ Token obtido; expira em ${resp.data.expires_in}s`)
     res.send('Autenticação concluída com sucesso!')
   } catch (err) {
     console.error('❌ Erro ao obter token:', err.response?.data || err.message)
@@ -96,24 +84,24 @@ app.get('/callback', async (req, res) => {
   }
 })
 
-// Endpoint para refresh automático do token, se desejar
+// (Opcional) Renova via refresh_token se você gravar esse token em ENV
 app.get('/refresh', async (req, res) => {
   const refreshToken = process.env.REFRESH_TOKEN
   if (!refreshToken) return res.status(400).send('Refresh token ausente')
   try {
-    const response = await axios.post(
+    const resp = await axios.post(
       'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
       qs.stringify({
-        grant_type: 'refresh_token',
+        grant_type:    'refresh_token',
         refresh_token: refreshToken,
-        client_id: tokenSettings.clientId,
-        client_secret: tokenSettings.clientSecret
+        client_id:     process.env.CLIENT_ID,
+        client_secret: process.env.CLIENT_SECRET
       }),
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     )
-    accessToken = response.data.access_token
+    accessToken = resp.data.access_token
     process.env.TINY_ACCESS_TOKEN = accessToken
-    console.log(`🔄 Token renovado; expira em ${response.data.expires_in}s`)
+    console.log(`🔄 Token renovado; expira em ${resp.data.expires_in}s`)
     res.send('Token renovado com sucesso')
   } catch (err) {
     console.error('❌ Erro ao renovar token:', err.response?.data || err.message)
@@ -121,9 +109,7 @@ app.get('/refresh', async (req, res) => {
   }
 })
 
-// --------- Integração de Ordem de Compra ---------
-
-// Envia ordem de compra ao Tiny usando o token obtido
+// ----- Integração de Ordem de Compra -----
 app.get('/enviar-oc', async (req, res) => {
   if (!accessToken) return res.status(401).send('Sem token. Chame /auth primeiro.')
   try {
@@ -136,13 +122,10 @@ app.get('/enviar-oc', async (req, res) => {
   }
 })
 
-// --------- Listar Marcas via API v3 ---------
-
-// Delegado para o handler em routes/listarMarcas.js
+// ----- Listar Marcas via API v3 -----
 app.get('/listar-marcas', listarMarcas)
 
-// --------- Consulta produto por código ---------
-
+// ----- Consulta produto por código -----
 app.get('/produto/:codigo', async (req, res) => {
   const { codigo } = req.params
   if (!codigo) return res.status(400).json({ erro: 'Código é obrigatório' })
@@ -156,13 +139,7 @@ app.get('/produto/:codigo', async (req, res) => {
   }
 })
 
-// --------- Health Check ---------
+// ----- Health Check -----
+app.get('/', (req, res) => res.send('API Tiny-Mongo OK'))
 
-app.get('/', (req, res) => {
-  res.send('API Tiny-Mongo OK')
-})
-
-// Inicia servidor
-app.listen(port, () => {
-  console.log(`🚀 Servidor rodando na porta ${port}`)
-})
+app.listen(port, () => console.log(`🚀 Servidor rodando na porta ${port}`))
