@@ -27,7 +27,7 @@ mongoClient.connect()
   })
   .catch(err => console.error('❌ [listarMarcas.js] Erro MongoDB:', err));
 
-// Função utilitária de sleep
+// utilitário de sleep
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -46,11 +46,11 @@ async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
   }
 }
 
-// Busca de marca via API v3 com retry/backoff em caso de 429
+// Busca marca pela API v3, extrai de resp.data.marca.nome
 async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
   const token = process.env.TINY_ACCESS_TOKEN;
   if (!token) {
-    console.warn('⚠️ ACCESS_TOKEN v3 não definido. Chame /auth → /callback primeiro.');
+    console.warn('⚠️ TOKEN v3 ausente. Rode /auth → /callback primeiro.');
     return null;
   }
   try {
@@ -58,31 +58,14 @@ async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
       `${TINY_API_V3_BASE}/produtos/${produtoId}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
-    const data = resp.data?.data;
-    if (!data) {
-      console.warn(`⚠️ Resposta sem data para ID ${produtoId}`);
+    // resp.data já é o objeto do produto conforme o teste
+    const produto = resp.data;
+    const marcaNome = produto.marca?.nome;
+    if (!marcaNome) {
+      console.warn(`⚠️ Produto ${produtoId} não trouxe marca no campo marca.nome`);
       return null;
     }
-    // Extrai marca de forma genérica navegando pelo objeto
-    function findBrand(obj) {
-      if (!obj || typeof obj !== 'object') return null;
-      if (obj.marca) {
-        const m = obj.marca;
-        if (typeof m === 'object') return m.nome || m.descricao || null;
-        if (typeof m === 'string') return m.trim();
-      }
-      for (const key of Object.keys(obj)) {
-        const val = obj[key];
-        if (typeof val === 'object') {
-          const found = findBrand(val);
-          if (found) return found;
-        }
-      }
-      return null;
-    }
-    const marca = findBrand(data);
-    if (!marca) console.warn(`⚠️ Produto ${produtoId} não retornou campo marca na v3`);
-    return marca;
+    return marcaNome.trim();
   } catch (err) {
     const status = err.response?.status;
     if (status === 429 && retries > 0) {
@@ -91,12 +74,12 @@ async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
       await sleep(delay);
       return fetchMarcaV3(produtoId, retries - 1);
     }
-    console.warn(`⚠️ Falha ao obter marca V3 para ID ${produtoId}: ${status}`);
+    console.warn(`⚠️ Erro ao buscar marca v3 para ID ${produtoId}: ${status}`);
     return null;
   }
 }
 
-// Handler principal: itera páginas, busca ID via v2 e marca via v3
+// Handler principal: paginação pela API v2 e fallback para v3
 async function listarMarcas(req, res) {
   let pagina = 1;
   let totalProdutos = 0;
@@ -107,7 +90,6 @@ async function listarMarcas(req, res) {
 
   try {
     while (true) {
-      // Listagem base (API v2) para obter IDs e códigos
       const response = await axios.post(API_V2_LIST_URL, null, {
         params: { token: API_V2_TOKEN, formato: 'json', pagina },
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -126,7 +108,7 @@ async function listarMarcas(req, res) {
           const nome   = produto.nome?.trim();
           let marca    = produto.marca?.trim();
 
-          // Se não veio marca na listagem v2, busca na v3
+          // Se não veio marca na v2, busca na v3 usando ID
           if (!marca && produto.id) {
             marca = await fetchMarcaV3(produto.id);
           }
@@ -178,7 +160,6 @@ async function listarMarcas(req, res) {
       tempo: duracao + 's',
       topMarcas: contagemMarcas
     });
-
   } catch (error) {
     console.error('❌ Erro ao listar marcas:', error.response?.data || error.message);
     res.status(500).json({ erro: 'Erro ao listar marcas.' });
