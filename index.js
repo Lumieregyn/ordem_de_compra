@@ -1,4 +1,7 @@
 // index.js
+// Arquivo principal do backend Lumiéregyn
+// Inclui: OAuth2 (OpenID Connect) para Tiny API v3, debug de JSON v3, rota /listar-marcas e envio de OC
+
 require('dotenv').config();
 const express = require('express');
 const axios   = require('axios');
@@ -28,7 +31,7 @@ mongoClient.connect()
 app.use(express.json());
 
 // ----- OAuth2 (OpenID Connect) para Tiny API v3 -----
-const OIDC_SCOPES = 'produtos:read marcas:read'; // << escopos corrigidos
+const OIDC_SCOPES = 'openid';  // ajuste no painel Tiny para incluir produtos:read, marcas:read, etc.
 
 app.get('/auth', (req, res) => {
   const params = new URLSearchParams({
@@ -67,6 +70,7 @@ app.get('/callback', async (req, res) => {
   }
 });
 
+// (Opcional) refresh do token
 app.get('/refresh', async (req, res) => {
   const refreshToken = process.env.REFRESH_TOKEN;
   if (!refreshToken) return res.status(400).send('Refresh token ausente');
@@ -91,7 +95,7 @@ app.get('/refresh', async (req, res) => {
   }
 });
 
-// ----- Debug JSON da API v3 -----
+// ----- Debug endpoint para inspecionar JSON cru da API v3 -----
 app.get('/test-marca/:id', async (req, res) => {
   const { id } = req.params;
   if (!accessToken) return res.status(401).send('Sem token v3. Chame /auth primeiro.');
@@ -106,7 +110,7 @@ app.get('/test-marca/:id', async (req, res) => {
   }
 });
 
-// ----- Enviar OC -----
+// ----- Envio de Ordem de Compra -----
 app.post('/enviar-oc', async (req, res) => {
   if (!accessToken) return res.status(401).send('Sem token. Chame /auth primeiro.');
   const dados = req.body || {};
@@ -116,14 +120,10 @@ app.post('/enviar-oc', async (req, res) => {
   res.json(result.data);
 });
 
-// ----- Listar marcas com token atualizado -----
-app.get('/listar-marcas', async (req, res) => {
-  if (!accessToken) return res.status(401).send('Token ausente. Autentique via /auth');
-  process.env.TINY_ACCESS_TOKEN = accessToken; // força atualização
-  return listarMarcas(req, res);
-});
+// ----- Listar Marcas via API v3 -----
+app.get('/listar-marcas', listarMarcas);
 
-// ----- Buscar produto salvo -----
+// ----- Consulta produto por código -----
 app.get('/produto/:codigo', async (req, res) => {
   const { codigo } = req.params;
   if (!codigo) return res.status(400).json({ erro: 'Código é obrigatório' });
