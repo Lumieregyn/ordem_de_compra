@@ -1,3 +1,5 @@
+// index.js atualizado — modular, completo e com rotas principais
+
 const express = require('express');
 const dotenv = require('dotenv');
 dotenv.config();
@@ -14,7 +16,7 @@ const port = process.env.PORT || 8080;
 
 let accessToken = null;
 
-// Conexão com MongoDB
+// Conexão MongoDB
 const mongoClient = new MongoClient(process.env.MONGO_URI);
 let produtosCollection;
 
@@ -24,7 +26,7 @@ mongoClient.connect().then(() => {
   console.log('✅ Conectado ao MongoDB');
 });
 
-// 🔐 Autenticação OAuth Tiny
+// Autenticação Tiny
 app.get('/auth', (req, res) => {
   const authUrl = `https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?response_type=code&client_id=${encodeURIComponent(process.env.CLIENT_ID)}&redirect_uri=${encodeURIComponent(process.env.REDIRECT_URI)}&scope=openid`;
   res.redirect(authUrl);
@@ -46,6 +48,7 @@ app.get('/callback', async (req, res) => {
       }),
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     );
+
     accessToken = response.data.access_token;
     res.send('Autenticação concluída com sucesso!');
   } catch (error) {
@@ -53,9 +56,10 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// Enviar OC
+// Enviar Ordem de Compra
 app.get('/enviar-oc', async (req, res) => {
   if (!accessToken) return res.send('No access token. Call /auth first.');
+
   try {
     const xml = gerarOrdemCompra();
     const response = await enviarOrdemCompra(accessToken, xml);
@@ -65,10 +69,10 @@ app.get('/enviar-oc', async (req, res) => {
   }
 });
 
-// Listar marcas delegando para rotas/listarMarcas.js
+// Rota principal: listar marcas (conectada ao módulo externo atualizado)
 app.get('/listar-marcas', listarMarcas);
 
-// Consultar produto por código
+// Buscar produto por código direto no Mongo
 app.get('/produto/:codigo', async (req, res) => {
   const codigo = req.params.codigo;
   if (!codigo) return res.status(400).json({ erro: 'Código é obrigatório' });
@@ -82,7 +86,7 @@ app.get('/produto/:codigo', async (req, res) => {
   }
 });
 
-// Inicializa o servidor
+// Inicialização do servidor
 app.listen(port, () => {
   console.log(`🚀 Servidor rodando na porta ${port}`);
 });
