@@ -10,10 +10,10 @@ const pLimit = require('p-limit');
 const { MongoClient } = require('mongodb');
 const { gerarOrdemCompra } = require('./services/ocGenerator');
 const { enviarOrdemCompra } = require('./services/enviarOrdem');
-const { listarMarcas } = require('./router/listarMarcas');
+const { listarMarcas } = require('./listarMarcas'); // ajustado import para arquivo na raiz
 
 // Configurações iniciais
-tokenSettings = {
+const tokenSettings = {
   clientId: process.env.CLIENT_ID,
   clientSecret: process.env.CLIENT_SECRET,
   redirectUri: process.env.REDIRECT_URI,
@@ -45,13 +45,7 @@ async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
   try {
     await produtosCollection.updateOne(
       { codigo },
-      {
-        $set: {
-          nome,
-          marca,
-          atualizado_em: new Date(),
-        },
-      },
+      { $set: { nome, marca, atualizado_em: new Date() } },
       { upsert: true }
     );
   } catch (err) {
@@ -59,12 +53,11 @@ async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
   }
 }
 
-// Middleware para parsing de JSON (caso necessário)
+// Middleware para parsing de JSON
 app.use(express.json());
 
 // ----- Rotas OAuth2 Tiny (v3) -----
 
-// Inicia fluxo OAuth2 pelo Tiny (OpenID Connect)
 app.get('/auth', (req, res) => {
   const { clientId, redirectUri, scopes } = tokenSettings;
   const authUrl =
@@ -76,7 +69,6 @@ app.get('/auth', (req, res) => {
   res.redirect(authUrl);
 });
 
-// Callback de OAuth2
 app.get('/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send('Código de autorização ausente');
@@ -93,7 +85,6 @@ app.get('/callback', async (req, res) => {
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     );
     accessToken = response.data.access_token;
-    // Disponibiliza para outras rotas
     process.env.TINY_ACCESS_TOKEN = accessToken;
     console.log('✅ Token obtido, válido até', response.data.expires_in, 'segundos');
     res.send('Autenticação concluída com sucesso!');
@@ -103,7 +94,6 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// Endpoint para renovar token (refresh_token automático)
 app.get('/refresh', async (req, res) => {
   const refreshToken = process.env.REFRESH_TOKEN;
   if (!refreshToken) return res.status(400).send('Refresh token ausente');
@@ -143,7 +133,7 @@ app.get('/enviar-oc', async (req, res) => {
 });
 
 // ----- Rota Listar Marcas (Produto) -----
-// Delegada ao router/routerListarMarcas.js
+// Delegada ao arquivo listarMarcas.js na raiz do projeto
 app.get('/listar-marcas', listarMarcas);
 
 // ----- Endpoint para consulta de produto por código -----
