@@ -7,11 +7,13 @@ const { MongoClient } = require('mongodb');
 
 // Configurações
 const TINY_API_V3_BASE  = 'https://erp.tiny.com.br/public-api/v3';
-const API_V2_LIST_URL   = 'https://api.tiny.com.br/api2/produtos.pesquisa.php';
-const API_V2_TOKEN      = process.env.TINY_API_TOKEN;
 const CONCURRENCY       = 2;
 const MAX_RETRIES       = 3;
 const BACKOFF_BASE      = 500; // ms para backoff
+
+// (a variável API_V2_LIST_URL não é mais usada)
+
+const PAGE_SIZE = 100;               // itens por página na listagem v3
 
 // Conexão com MongoDB
 const mongoClient = new MongoClient(process.env.MONGO_URI, {
@@ -58,7 +60,6 @@ async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
       `${TINY_API_V3_BASE}/produtos/${produtoId}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
-    // resp.data já é o objeto do produto conforme o teste
     const produto = resp.data;
     const marcaNome = produto.marca?.nome;
     if (!marcaNome) {
@@ -79,7 +80,7 @@ async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
   }
 }
 
-// Handler principal: paginação pela API v2 e fallback para v3
+// Handler principal: agora usando BULK listagem v3 sem chamadas por ID
 async function listarMarcas(req, res) {
   let pagina = 1;
   let totalProdutos = 0;
@@ -90,25 +91,34 @@ async function listarMarcas(req, res) {
 
   try {
     while (true) {
-      const response = await axios.post(API_V2_LIST_URL, null, {
-        params: { token: API_V2_TOKEN, formato: 'json', pagina },
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      });
+      // <<< SUBSTITUIÇÃO AQUI >>> 
+      // De:
+      // const response = await axios.post(API_V2_LIST_URL, null, { ... })
+      // const produtos = response.data?.retorno?.produtos || [];
+      //
+      // Para listagem em lote via v3:
+      const resp = await axios.get(
+        `${TINY_API_V3_BASE}/produtos`,
+        {
+          params: { pagina, itens: PAGE_SIZE },
+          headers: { Authorization: `Bearer ${process.env.TINY_ACCESS_TOKEN}` }
+        }
+      );
+      const produtos = resp.data?.data || [];
+      // <<< FIM DA SUBSTITUIÇÃO >>>
 
-      const produtos = response.data?.retorno?.produtos || [];
       if (!produtos.length) break;
-
       console.log(`[Página ${pagina}] Processando ${produtos.length} produtos...`);
       const marcasPagina = new Set();
 
-      const tarefas = produtos.map(({ produto }) =>
+      const tarefas = produtos.map(produto =>
         limit(async () => {
           totalProdutos++;
-          const codigo = produto.codigo;
-          const nome   = produto.nome?.trim();
-          let marca    = produto.marca?.trim();
+          const codigo = produto.sku || produto.codigo;
+          const nome   = (produto.descricao || produto.nome).trim();
+          let marca    = produto.marca?.nome?.trim();
 
-          // Se não veio marca na v2, busca na v3 usando ID
+          // fallback antigo, caso alguma marca venha ausente
           if (!marca && produto.id) {
             marca = await fetchMarcaV3(produto.id);
           }
@@ -122,7 +132,6 @@ async function listarMarcas(req, res) {
           await salvarOuAtualizarProduto({ codigo, nome, marca });
         })
       );
-
       await Promise.all(tarefas);
 
       console.log(`→ Marcas válidas nesta página: ${marcasPagina.size}`);
