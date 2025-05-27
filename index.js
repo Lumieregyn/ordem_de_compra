@@ -1,10 +1,11 @@
-// index.js atualizado — modular, completo e com rotas principais
+// index.js completo e ajustado com caminho absoluto e modularização correta
 
 const express = require('express');
 const dotenv = require('dotenv');
 dotenv.config();
 
-const { listarMarcas } = require('./rotas/listarMarcas');
+const path = require('path');
+const { listarMarcas } = require(path.join(__dirname, 'rotas', 'listarMarcas'));
 const { gerarOrdemCompra } = require('./services/ocGenerator');
 const { enviarOrdemCompra } = require('./services/enviarOrdem');
 const { MongoClient } = require('mongodb');
@@ -69,7 +70,7 @@ app.get('/enviar-oc', async (req, res) => {
   }
 });
 
-// Rota principal: listar marcas (conectada ao módulo externo atualizado)
+// Rota principal: listar marcas
 app.get('/listar-marcas', listarMarcas);
 
 // Buscar produto por código direto no Mongo
