@@ -63,7 +63,8 @@ async function fetchMarcaV3(produtoId, marcasConhecidas = [], retries = MAX_RETR
     );
 
     const produto = resp.data;
-    console.log(`📦 Produto ${produto.sku} retornado da v3: marca direta =`, produto.marca?.nome);
+    const skuLog = produto.sku || 'sem SKU';
+    console.log(`📦 Produto ${skuLog} retornado da v3: marca direta =`, produto.marca?.nome);
 
     let marca = produto.marca?.nome?.trim();
 
@@ -72,7 +73,7 @@ async function fetchMarcaV3(produtoId, marcasConhecidas = [], retries = MAX_RETR
       if (marca) {
         console.log(`✅ Marca inferida com heurística: ${marca}`);
       } else {
-        console.log(`❌ Nenhuma marca inferida via heurística para ${produto.sku}`);
+        console.log(`❌ Nenhuma marca inferida via heurística para ${skuLog}`);
       }
     }
 
