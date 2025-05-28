@@ -1,10 +1,10 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { authCallback, getAccessToken } = require('./serviços/tokenService');
-const { processarProdutosTiny } = require('./serviços/tinyService');
-const { inferirMarcaViaIA } = require('./serviços/openaiMarcaService');
-const { getProdutoFromTinyV3 } = require('./serviços/tinyProductService');
+const { authCallback, getAccessToken } = require('./services/tokenService');
+const { processarProdutosTiny } = require('./services/tinyService');
+const { inferirMarcaViaIA } = require('./services/openaiMarcaService');
+const { getProdutoFromTinyV3 } = require('./services/tinyProductService');
 
 const app = express();
 app.use(cors());
