@@ -4,7 +4,7 @@ const { getProdutosCollection } = require('../services/mongoClient');
 
 router.get('/', async (req, res) => {
   try {
-    const collection = await getProdutosCollection(); // <<< Adicione o await aqui
+    const collection = await getProdutosCollection();
     const produtos = await collection.find({}).toArray();
     res.json(produtos);
   } catch (error) {
