@@ -10,11 +10,20 @@ const API_V2_TOKEN = process.env.TINY_API_TOKEN;
 const CONCURRENCY = 1;
 const MAX_RETRIES = 3;
 const BACKOFF_BASE = 1000;
-const MAX_FALLOWS = 10;
+const MAX_FALLOWS = 50; // aumentamos o limite para 50 chamadas fallback
 
 const marcasCache = new Map();
 let chamadasV3 = 0;
 let fallbacksUsados = 0;
+
+function normalizeTexto(texto) {
+  return texto
+    ?.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .replace(/[^a-zA-Z0-9 ]/g, '') // remove caracteres especiais
+    .toLowerCase()
+    .trim();
+}
 
 function extrairMarcaComHeuristica(produto, marcasConhecidas = []) {
   const fontesTexto = [
@@ -28,15 +37,14 @@ function extrairMarcaComHeuristica(produto, marcasConhecidas = []) {
   ];
 
   for (const texto of fontesTexto) {
-    if (!texto) continue;
-    const textoNorm = texto.toLowerCase();
+    const textoNorm = normalizeTexto(texto);
+    if (!textoNorm) continue;
     for (const marca of marcasConhecidas) {
-      if (textoNorm.includes(marca.toLowerCase())) {
+      if (textoNorm.includes(normalizeTexto(marca))) {
         return marca;
       }
     }
   }
-
   return null;
 }
 
