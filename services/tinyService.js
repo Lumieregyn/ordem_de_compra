@@ -16,7 +16,6 @@ const marcasCache = new Map();
 let chamadasV3 = 0;
 let fallbacksUsados = 0;
 
-// 🧠 Heurística para extrair marca do produto
 function extrairMarcaComHeuristica(produto, marcasConhecidas = []) {
   const fontesTexto = [
     produto.nome,
@@ -45,7 +44,6 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// 🔁 Busca marca via API v3 com fallback heurístico
 async function fetchMarcaV3(produtoId, marcasConhecidas = [], retries = MAX_RETRIES) {
   if (marcasCache.has(produtoId)) {
     return marcasCache.get(produtoId);
@@ -65,12 +63,16 @@ async function fetchMarcaV3(produtoId, marcasConhecidas = [], retries = MAX_RETR
     );
 
     const produto = resp.data;
+    console.log(`📦 Produto ${produto.sku} retornado da v3: marca direta =`, produto.marca?.nome);
+
     let marca = produto.marca?.nome?.trim();
 
     if (!marca) {
       marca = extrairMarcaComHeuristica(produto, marcasConhecidas);
       if (marca) {
-        console.log(`🔍 Marca inferida via heurística: ${marca} (produto: ${produto.sku})`);
+        console.log(`✅ Marca inferida com heurística: ${marca}`);
+      } else {
+        console.log(`❌ Nenhuma marca inferida via heurística para ${produto.sku}`);
       }
     }
 
@@ -90,7 +92,6 @@ async function fetchMarcaV3(produtoId, marcasConhecidas = [], retries = MAX_RETR
   }
 }
 
-// 💾 Upsert no MongoDB
 async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
   if (!codigo || !nome) return;
 
@@ -107,12 +108,13 @@ async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
       },
       { upsert: true }
     );
+
+    console.log(`💾 Produto salvo: ${codigo} | Marca: ${marca || 'N/A'}`);
   } catch (err) {
     console.error(`❌ Erro ao salvar produto ${codigo}:`, err);
   }
 }
 
-// 🔄 Loop principal de processamento
 async function processarProdutosTiny() {
   let pagina = 1;
   let totalProdutos = 0;
@@ -121,7 +123,6 @@ async function processarProdutosTiny() {
   const limit = pLimit(CONCURRENCY);
   const contagemMarcas = {};
 
-  // Carrega marcas conhecidas do banco
   const marcasConhecidas = await getProdutosCollection()
     .distinct('marca', { marca: { $ne: null } });
 
@@ -143,6 +144,8 @@ async function processarProdutosTiny() {
         let marca = marcaBruta?.trim();
 
         if (!marca && id) {
+          console.log(`🔎 Produto sem marca direta: ${codigo} → tentando fallback com id ${id}`);
+
           if (fallbacksUsados >= MAX_FALLOWS) {
             console.log(`⏳ Fallback v3 ignorado (limite de ${MAX_FALLOWS} atingido) para código: ${codigo}`);
           } else {
