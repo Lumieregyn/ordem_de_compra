@@ -1,4 +1,4 @@
-const axios = require('axios');
+ const axios = require('axios');
 const pLimit = require('p-limit');
 const { getProdutosCollection } = require('./mongoClient');
 const { getAccessToken } = require('./tokenService');
@@ -74,7 +74,7 @@ async function fetchMarcaV3(produtoId, marcasConhecidas = [], retries = MAX_RETR
       if (marca) {
         console.log(`✅ Marca inferida com heurística: ${marca}`);
       } else {
-        marca = await inferirMarcaViaIA(produto);
+        marca = await inferirMarcaViaIA(produto);  // ENVIA JSON COMPLETO PARA A IA
         if (marca) {
           console.log(`✅ Marca inferida via IA: ${marca}`);
         } else {
