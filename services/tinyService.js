@@ -10,17 +10,16 @@ const API_V2_TOKEN = process.env.TINY_API_TOKEN;
 const CONCURRENCY = 1;
 const MAX_RETRIES = 3;
 const BACKOFF_BASE = 1000;
-const MAX_FALLOWS = 50; // aumentamos o limite para 50 chamadas fallback
+const MAX_FALLOWS = 50; // Aumentado conforme solicitado
 
 const marcasCache = new Map();
 let chamadasV3 = 0;
 let fallbacksUsados = 0;
 
-function normalizeTexto(texto) {
+function normalizarTexto(texto) {
   return texto
     ?.normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // remove acentos
-    .replace(/[^a-zA-Z0-9 ]/g, '') // remove caracteres especiais
+    .replace(/\p{Diacritic}/gu, '')
     .toLowerCase()
     .trim();
 }
@@ -37,14 +36,15 @@ function extrairMarcaComHeuristica(produto, marcasConhecidas = []) {
   ];
 
   for (const texto of fontesTexto) {
-    const textoNorm = normalizeTexto(texto);
-    if (!textoNorm) continue;
+    if (!texto) continue;
+    const textoNorm = normalizarTexto(texto);
     for (const marca of marcasConhecidas) {
-      if (textoNorm.includes(normalizeTexto(marca))) {
+      if (textoNorm.includes(normalizarTexto(marca))) {
         return marca;
       }
     }
   }
+
   return null;
 }
 
@@ -71,19 +71,23 @@ async function fetchMarcaV3(produtoId, marcasConhecidas = [], retries = MAX_RETR
     );
 
     const produto = resp.data;
-    const skuLog = produto?.sku || produto?.codigo || 'sem SKU';
+    const skuLog = produto?.sku || 'sem SKU';
     const marcaBruta = produto?.marca?.nome;
-
-    console.log(`📦 Produto ${skuLog} retornado da v3: marca direta =`, marcaBruta);
-
     let marca = marcaBruta?.trim();
+
+    console.log(`📦 Produto ${skuLog} retornado da v3. Campo marca =`, JSON.stringify(produto.marca));
+
+    if (!marca && produto?.marca && typeof produto.marca === 'object') {
+      marca = Object.values(produto.marca).join(' ')?.trim();
+      console.log(`🔁 Marca recuperada manualmente: ${marca}`);
+    }
 
     if (!marca) {
       marca = extrairMarcaComHeuristica(produto, marcasConhecidas);
       if (marca) {
         console.log(`✅ Marca inferida com heurística: ${marca}`);
       } else {
-        console.log(`❌ Nenhuma marca inferida via heurística para ${skuLog}`);
+        console.log(`❌ Nenhuma marca de lesão via heurística para ${skuLog}`);
       }
     }
 
