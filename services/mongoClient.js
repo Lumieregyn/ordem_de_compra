@@ -1,24 +1,26 @@
 const { MongoClient } = require('mongodb');
 
-const mongoClient = new MongoClient(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+const dbName = process.env.MONGODB_DB || 'tiny';
+const collectionName = 'produtos';
 
-let produtosCollection;
+let client;
+let db;
 
-async function conectarMongo() {
-  try {
-    await mongoClient.connect();
-    produtosCollection = mongoClient.db('ordens').collection('produtos');
-    console.log('✅ [mongoClient] Conectado ao MongoDB');
-  } catch (err) {
-    console.error('❌ [mongoClient] Erro na conexão com MongoDB:', err);
-    throw err;
+async function connectToMongo() {
+  if (!client || !client.isConnected()) {
+    client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+    await client.connect();
+    db = client.db(dbName);
+    console.log('✅ Conectado ao MongoDB');
   }
 }
 
-module.exports = {
-  conectarMongo,
-  getProdutosCollection: () => produtosCollection,
-};
+async function getProdutosCollection() {
+  if (!db) {
+    await connectToMongo();
+  }
+  return db.collection(collectionName);
+}
+
+module.exports = { getProdutosCollection };
