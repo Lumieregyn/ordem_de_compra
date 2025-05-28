@@ -10,17 +10,43 @@ const API_V2_TOKEN = process.env.TINY_API_TOKEN;
 const CONCURRENCY = 1;
 const MAX_RETRIES = 3;
 const BACKOFF_BASE = 1000;
-const MAX_FALLOWS = 10; // novo: máximo de buscas via v3 por execução
+const MAX_FALLOWS = 10;
 
 const marcasCache = new Map();
 let chamadasV3 = 0;
 let fallbacksUsados = 0;
 
+// 🧠 Heurística para extrair marca do produto
+function extrairMarcaComHeuristica(produto, marcasConhecidas = []) {
+  const fontesTexto = [
+    produto.nome,
+    produto.descricao,
+    produto.descricaoComplementar,
+    produto.observacoes,
+    produto.categoria?.nome,
+    produto.categoria?.caminhoCompleto,
+    ...(produto.atributos || []).map(a => `${a.nome}: ${a.valor}`)
+  ];
+
+  for (const texto of fontesTexto) {
+    if (!texto) continue;
+    const textoNorm = texto.toLowerCase();
+    for (const marca of marcasConhecidas) {
+      if (textoNorm.includes(marca.toLowerCase())) {
+        return marca;
+      }
+    }
+  }
+
+  return null;
+}
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
+// 🔁 Busca marca via API v3 com fallback heurístico
+async function fetchMarcaV3(produtoId, marcasConhecidas = [], retries = MAX_RETRIES) {
   if (marcasCache.has(produtoId)) {
     return marcasCache.get(produtoId);
   }
@@ -38,8 +64,17 @@ async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
-    const marca = resp.data.marca?.nome?.trim() || null;
-    marcasCache.set(produtoId, marca);
+    const produto = resp.data;
+    let marca = produto.marca?.nome?.trim();
+
+    if (!marca) {
+      marca = extrairMarcaComHeuristica(produto, marcasConhecidas);
+      if (marca) {
+        console.log(`🔍 Marca inferida via heurística: ${marca} (produto: ${produto.sku})`);
+      }
+    }
+
+    marcasCache.set(produtoId, marca || null);
     return marca;
   } catch (err) {
     const status = err.response?.status;
@@ -47,7 +82,7 @@ async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
       const delay = BACKOFF_BASE * Math.pow(2, MAX_RETRIES - retries);
       console.warn(`⚠️ Rate limit (429), retry em ${delay}ms`);
       await sleep(delay);
-      return fetchMarcaV3(produtoId, retries - 1);
+      return fetchMarcaV3(produtoId, marcasConhecidas, retries - 1);
     }
 
     console.warn(`⚠️ Erro ao buscar marca v3 para ID ${produtoId}: ${status}`);
@@ -55,6 +90,7 @@ async function fetchMarcaV3(produtoId, retries = MAX_RETRIES) {
   }
 }
 
+// 💾 Upsert no MongoDB
 async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
   if (!codigo || !nome) return;
 
@@ -76,6 +112,7 @@ async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
   }
 }
 
+// 🔄 Loop principal de processamento
 async function processarProdutosTiny() {
   let pagina = 1;
   let totalProdutos = 0;
@@ -83,6 +120,10 @@ async function processarProdutosTiny() {
   const inicio = Date.now();
   const limit = pLimit(CONCURRENCY);
   const contagemMarcas = {};
+
+  // Carrega marcas conhecidas do banco
+  const marcasConhecidas = await getProdutosCollection()
+    .distinct('marca', { marca: { $ne: null } });
 
   while (true) {
     const response = await axios.post(API_V2_LIST_URL, null, {
@@ -101,12 +142,11 @@ async function processarProdutosTiny() {
         const { codigo, nome, marca: marcaBruta, id } = produto;
         let marca = marcaBruta?.trim();
 
-        // Se a marca estiver ausente, tentar o fallback (limitado)
         if (!marca && id) {
           if (fallbacksUsados >= MAX_FALLOWS) {
             console.log(`⏳ Fallback v3 ignorado (limite de ${MAX_FALLOWS} atingido) para código: ${codigo}`);
           } else {
-            marca = await fetchMarcaV3(id);
+            marca = await fetchMarcaV3(id, marcasConhecidas);
             fallbacksUsados++;
           }
         }
