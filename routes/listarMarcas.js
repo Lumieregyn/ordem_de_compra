@@ -1,13 +1,16 @@
-const { processarProdutosTiny } = require('../services/tinyService');
+const express = require('express');
+const router = express.Router();
+const { getProdutosCollection } = require('../services/mongoClient');
 
-async function listarMarcas(req, res) {
+router.get('/', async (req, res) => {
   try {
-    const resultado = await processarProdutosTiny();
-    res.json({ sucesso: true, ...resultado });
-  } catch (err) {
-    console.error('❌ Erro em /listar-marcas:', err);
-    res.status(500).json({ sucesso: false, erro: 'Falha ao listar marcas' });
+    const collection = getProdutosCollection();
+    const produtos = await collection.find({}).toArray();
+    res.json(produtos);
+  } catch (error) {
+    console.error('Erro ao listar marcas:', error);
+    res.status(500).send('Erro ao listar marcas');
   }
-}
+});
 
-module.exports = { listarMarcas };
+module.exports = router;
