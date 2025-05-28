@@ -3,9 +3,10 @@ const express = require('express');
 const cors = require('cors');
 
 const { authCallback, getAccessToken } = require('./services/tokenService');
-const { processarProdutosTiny } = require('./services/tinyService'); // ajuste aqui conforme o nome do arquivo real
+const { processarProdutosTiny } = require('./services/tinyService');
 const { inferirMarcaViaIA } = require('./services/openaiMarcaService');
 const { getProdutoFromTinyV3 } = require('./services/tinyProductService');
+const listarMarcasRoute = require('./routes/listarMarcas');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -74,6 +75,9 @@ app.get('/testar-marca-ia/:id', async (req, res) => {
     res.status(500).send('Erro na inferência de marca');
   }
 });
+
+// 📦 Listar produtos do MongoDB
+app.use('/listar-marcas', listarMarcasRoute);
 
 app.listen(PORT, () => {
   console.log(`🌐 Servidor rodando na porta ${PORT}`);
