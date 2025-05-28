@@ -2,6 +2,7 @@ const axios = require('axios');
 const pLimit = require('p-limit');
 const { getProdutosCollection } = require('./mongoClient');
 const { getAccessToken } = require('./tokenService');
+const { inferirMarcaViaIA } = require('./aiBrandInferenceService');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 const API_V2_LIST_URL = 'https://api.tiny.com.br/api2/produtos.pesquisa.php';
@@ -10,19 +11,11 @@ const API_V2_TOKEN = process.env.TINY_API_TOKEN;
 const CONCURRENCY = 1;
 const MAX_RETRIES = 3;
 const BACKOFF_BASE = 1000;
-const MAX_FALLOWS = 50; // Aumentado conforme solicitado
+const MAX_FALLOWS = 50;
 
 const marcasCache = new Map();
 let chamadasV3 = 0;
 let fallbacksUsados = 0;
-
-function normalizarTexto(texto) {
-  return texto
-    ?.normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLowerCase()
-    .trim();
-}
 
 function extrairMarcaComHeuristica(produto, marcasConhecidas = []) {
   const fontesTexto = [
@@ -37,9 +30,10 @@ function extrairMarcaComHeuristica(produto, marcasConhecidas = []) {
 
   for (const texto of fontesTexto) {
     if (!texto) continue;
-    const textoNorm = normalizarTexto(texto);
+    const textoNorm = texto.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
     for (const marca of marcasConhecidas) {
-      if (textoNorm.includes(normalizarTexto(marca))) {
+      const marcaNorm = marca.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+      if (textoNorm.includes(marcaNorm)) {
         return marca;
       }
     }
@@ -71,23 +65,21 @@ async function fetchMarcaV3(produtoId, marcasConhecidas = [], retries = MAX_RETR
     );
 
     const produto = resp.data;
-    const skuLog = produto?.sku || 'sem SKU';
-    const marcaBruta = produto?.marca?.nome;
-    let marca = marcaBruta?.trim();
+    console.log(`📦 Produto ${produto.sku || 'sem SKU'} retornado da v3: marca direta =`, produto.marca?.nome);
 
-    console.log(`📦 Produto ${skuLog} retornado da v3. Campo marca =`, JSON.stringify(produto.marca));
-
-    if (!marca && produto?.marca && typeof produto.marca === 'object') {
-      marca = Object.values(produto.marca).join(' ')?.trim();
-      console.log(`🔁 Marca recuperada manualmente: ${marca}`);
-    }
+    let marca = produto.marca?.nome?.trim();
 
     if (!marca) {
       marca = extrairMarcaComHeuristica(produto, marcasConhecidas);
       if (marca) {
         console.log(`✅ Marca inferida com heurística: ${marca}`);
       } else {
-        console.log(`❌ Nenhuma marca de lesão via heurística para ${skuLog}`);
+        marca = await inferirMarcaViaIA(produto);
+        if (marca) {
+          console.log(`✅ Marca inferida via IA: ${marca}`);
+        } else {
+          console.log(`❌ Nenhuma marca inferida via IA para ${produto.sku || 'sem SKU'}`);
+        }
       }
     }
 
