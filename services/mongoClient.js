@@ -1,28 +1,34 @@
 const { MongoClient } = require('mongodb');
 
-const uri = process.env.MONGO_URI || 'mongodb://localhost:27017'; // Corrigido o nome da env
+const uri = process.env.MONGO_URI;
 const dbName = process.env.MONGODB_DB || 'tiny';
 const collectionName = 'produtos';
 
-let client;
-let db;
+let cachedClient = null;
+let cachedDb = null;
 
 async function connectToMongo() {
-  if (!client) {
-    client = new MongoClient(uri, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    await client.connect();
-    db = client.db(dbName);
-    console.log('✅ Conectado ao MongoDB');
+  if (cachedClient && cachedDb) {
+    return cachedDb;
   }
+
+  const client = new MongoClient(uri, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  });
+
+  await client.connect();
+  const db = client.db(dbName);
+
+  cachedClient = client;
+  cachedDb = db;
+
+  console.log('✅ Conectado ao MongoDB');
+  return db;
 }
 
 async function getProdutosCollection() {
-  if (!db) {
-    await connectToMongo();
-  }
+  const db = await connectToMongo();
   return db.collection(collectionName);
 }
 
