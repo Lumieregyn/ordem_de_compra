@@ -1,18 +1,15 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { authCallback, getAccessToken } = require('./services/tokenService');
-const { processarProdutosTiny } = require('./services/tinySyncService');
-const { inferirMarcaViaIA } = require('./services/openaiMarcaService');
-const { getProdutoFromTinyV3 } = require('./services/tinyProductService');
+const { authCallback, getAccessToken } = require('./serviços/tokenService');
+const { processarProdutosTiny } = require('./serviços/tinyService');
+const { inferirMarcaViaIA } = require('./serviços/openaiMarcaService');
+const { getProdutoFromTinyV3 } = require('./serviços/tinyProductService');
 
 const app = express();
-
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Rotas principais
 app.get('/', (req, res) => {
   res.send('🚀 API Tiny Sync ativa.');
 });
@@ -58,9 +55,7 @@ app.get('/testar-marca-ia/:id', async (req, res) => {
   }
 });
 
-// Inicialização
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🌐 Servidor rodando na porta ${PORT}`);
 });
-
