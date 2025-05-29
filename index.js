@@ -13,6 +13,7 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 
 app.use(cors());
+app.use('/debug-token', require('./routes/tokenDebug'));
 app.use(express.json());
 
 // 🌐 Healthcheck
