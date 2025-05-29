@@ -1,46 +1,82 @@
-const axios = require('axios');
+const { Configuration, OpenAIApi } = require('openai');
 
+const configuration = new Configuration({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+const openai = new OpenAIApi(configuration);
+
+// IA que infere marca a partir de um produto isolado
 async function inferirMarcaViaIA(produto) {
   const prompt = `
-Você é um sistema especialista em catálogo de produtos. Receberá abaixo um objeto JSON com todos os dados de um produto cadastrado na Tiny.
+Você é uma IA que analisa dados de produtos de um ERP (Tiny) e tenta inferir a marca do produto com base nos dados disponíveis.
 
-Sua única tarefa é retornar o nome da marca do produto com base nas informações do JSON. O nome da marca está geralmente no campo "marca.nome", mas também pode aparecer na descrição, categoria ou variações.
-
-Retorne **apenas o nome da marca**, sem explicações, prefixos ou aspas.
-
-JSON do Produto:
+Abaixo está o JSON do produto:
 ${JSON.stringify(produto, null, 2)}
+
+Responda apenas com o nome da marca inferida. Se não conseguir inferir, responda "Desconhecida".
 `;
 
   try {
-    const response = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-4',
-        messages: [
-          { role: 'system', content: 'Você é um especialista em identificação de marcas de produtos baseado em JSONs da Tiny.' },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.2
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
+    const completion = await openai.createChatCompletion({
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+    });
 
-    let result = response.data.choices[0].message.content.trim();
-
-    // Normaliza a resposta (remove aspas extras e prefixos comuns)
-    result = result.replace(/^["']|["']$/g, '').replace(/marca[:\s]*/i, '').trim();
-
-    return result || null;
-  } catch (error) {
-    console.error('❌ Erro ao consultar IA para marca:', error.response?.data || error.message);
+    const marca = completion.data.choices[0].message.content.trim();
+    return marca;
+  } catch (err) {
+    console.error('❌ Erro na inferência de marca via IA:', err.message);
     return null;
   }
 }
 
-module.exports = { inferirMarcaViaIA };
+// IA que analisa um pedido completo e decide sobre Ordem de Compra
+async function analisarPedidoViaIA(pedidoJsonCompleto) {
+  const prompt = `
+Você é um sistema de inteligência artificial que analisa pedidos de venda no ERP Tiny.
+
+Com base nos dados abaixo, para cada item diga:
+- Se deve gerar uma ordem de compra (true/false)
+- O motivo da decisão
+- O nome da marca
+- O nome do fornecedor
+- O SKU (ou identificador do produto)
+
+Responda em JSON com a estrutura:
+{
+  "itens": [
+    {
+      "produtoSKU": "...",
+      "deveGerarOC": true,
+      "marca": "...",
+      "fornecedor": "...",
+      "motivo": "..."
+    }
+  ]
+}
+
+Abaixo está o JSON do pedido:
+${JSON.stringify(pedidoJsonCompleto, null, 2)}
+`;
+
+  try {
+    const completion = await openai.createChatCompletion({
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+    });
+
+    const text = completion.data.choices[0].message.content;
+    const resposta = JSON.parse(text);
+    return resposta;
+  } catch (err) {
+    console.error('❌ Erro ao interpretar resposta da IA:', err.message);
+    return { erro: 'Resposta inválida da IA' };
+  }
+}
+
+module.exports = {
+  inferirMarcaViaIA,
+  analisarPedidoViaIA,
+};
