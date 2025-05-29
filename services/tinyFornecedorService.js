@@ -1,61 +1,50 @@
+// Nova versão completa de services/tinyFornecedorService.js
 const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
 
-async function listarFornecedoresTiny() {
+const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
+
+function normalizarTexto(str) {
+  return str
+    ?.normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+async function getFornecedorIdPorNome(nomeMarca) {
   const token = getAccessToken();
   if (!token) {
-    console.warn('⚠️ Token da Tiny não encontrado.');
-    return [];
+    console.warn('⚠️ TOKEN ausente. Rode /auth → /callback primeiro.');
+    return null;
   }
 
-  const fornecedores = [];
-  let pagina = 1;
-  const tamanhoPagina = 50;
-
   try {
-    while (true) {
-      console.log(`🔄 Buscando fornecedores - Página ${pagina}`);
+    const response = await axios.get(`${TINY_API_V3_BASE}/contatos`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
 
-      const resp = await axios.get('https://erp.tiny.com.br/public-api/v3/contatos', {
-        headers: { Authorization: `Bearer ${token}` },
-        params: {
-          pagina,
-          tamanhoPagina
-        }
-      });
+    const contatos = response.data._embedded?.contatos || [];
 
-      if (!resp.data || !Array.isArray(resp.data.itens)) {
-        console.warn('⚠️ Estrutura inesperada no retorno da API de fornecedores:', resp.data);
-        break;
-      }
+    const marcaNormalizada = normalizarTexto(nomeMarca);
 
-      const itens = resp.data.itens;
-      if (itens.length === 0) break;
+    const fornecedor = contatos.find(f => {
+      const nomeFornecedor = normalizarTexto(f.nome);
+      return nomeFornecedor.includes(marcaNormalizada);
+    });
 
-      for (const item of itens) {
-        fornecedores.push({
-          id: item.id,
-          nome: item.nome
-        });
-      }
-
-      pagina++;
-
-      // ⏱️ Delay para evitar erro 429
-      await new Promise(res => setTimeout(res, 1000));
-
-      // 🔍 Remover este if para modo completo
-      if (pagina > 3) break; // ⚠️ LIMITADOR DE TESTE — remova em produção
+    if (fornecedor) {
+      console.log(`🔍 Fornecedor identificado: ${fornecedor.nome} (ID: ${fornecedor.id})`);
+      return fornecedor.id;
+    } else {
+      console.warn(`❌ Nenhum fornecedor compatível com marca: ${nomeMarca}`);
+      return null;
     }
 
-    console.log(`✅ ${fornecedores.length} fornecedores carregados da Tiny`);
-    return fornecedores;
   } catch (err) {
     console.error('❌ Erro ao buscar fornecedores da Tiny:', err.response?.data || err.message);
-    return [];
+    return null;
   }
 }
 
-module.exports = {
-  listarFornecedoresTiny
-};
+module.exports = { getFornecedorIdPorNome };
