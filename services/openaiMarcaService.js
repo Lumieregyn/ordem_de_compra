@@ -78,4 +78,5 @@ ${JSON.stringify(produto, null, 2)}
   }
 }
 
-module.exports = { inferirMarcaViaIA };
+module.exports = { analisarPedidoViaIA };
+
