@@ -27,32 +27,16 @@ async function listarTodosFornecedores() {
       if (!contatosPagina.length) break;
 
       console.log(`📄 Página ${page} - Contatos: ${contatosPagina.length}`);
-      console.log('🧾 Contatos recebidos (bruto):', contatosPagina.map(c => ({
-        nome: c.nome,
-        tipoPessoa: c.tipoPessoa
-      })));
 
-      const fornecedoresPagina = contatosPagina.filter(c =>
-        c.tipoPessoa === 'J' && c.nome && (
-          c.nome.toLowerCase().includes('ltda') ||
-          c.nome.toLowerCase().includes('ilumina') ||
-          c.nome.toLowerCase().includes('engenharia') ||
-          c.nome.toLowerCase().includes('comerc') ||
-          c.nome.toLowerCase().includes('materiais') ||
-          c.nome.toLowerCase().includes('forneced') ||
-          c.nome.toLowerCase().includes('industri') ||
-          c.nome.toLowerCase().includes('servi') ||
-          c.nome.toLowerCase().includes('epp')
-        )
-      );
-
+      const fornecedoresPagina = contatosPagina.filter(c => c.tipoPessoa === 'J');
       todos.push(...fornecedoresPagina);
+
       page++;
     }
 
     // Deduplicar por ID
     const fornecedoresUnicos = Array.from(new Map(todos.map(f => [f.id, f])).values());
-    console.log('📦 Total de fornecedores únicos:', fornecedoresUnicos.length);
+    console.log('📋 Fornecedores disponíveis:', fornecedoresUnicos.map(f => f.nome));
     return fornecedoresUnicos;
 
   } catch (err) {
@@ -69,7 +53,6 @@ router.post('/', async (req, res) => {
     }
 
     const fornecedores = await listarTodosFornecedores();
-    console.log('📋 Fornecedores disponíveis:', fornecedores.map(f => f.nome));
     const resultados = [];
 
     for (const item of pedido.itens) {
