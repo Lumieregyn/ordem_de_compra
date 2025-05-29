@@ -3,53 +3,48 @@ const { getAccessToken } = require('./tokenService');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 
-// Função para normalizar texto (remover acentos, minúsculas)
-function normalizarTexto(texto) {
-  return texto
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9]/g, '') // remove símbolos e espaços
-    .toLowerCase()
-    .trim();
-}
-
-async function getFornecedorIdPorNome(nomeMarca) {
+/**
+ * Lista todos os fornecedores registrados na Tiny ERP via API v3
+ * Retorna um array de objetos com no mínimo: id, nome
+ */
+async function listarTodosFornecedores() {
   const token = getAccessToken();
   if (!token) {
-    console.warn('⚠️ TOKEN ausente. Rode /auth → /callback primeiro.');
-    return null;
+    console.warn('⚠️ Token não encontrado. Rode /auth → /callback primeiro.');
+    return [];
   }
 
+  const fornecedores = [];
+  let page = 1;
+  const pageSize = 100;
+
   try {
-    const response = await axios.get(`${TINY_API_V3_BASE}/contatos`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    while (true) {
+      const response = await axios.get(`${TINY_API_V3_BASE}/contatos`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: {
+          tipo: 'fornecedor',
+          page,
+          size: pageSize
+        }
+      });
 
-    const contatos = response.data._embedded?.contatos || [];
-    const nomeMarcaNorm = normalizarTexto(nomeMarca);
+      const data = response.data;
 
-    // Match flexível por normalização
-    const fornecedor = contatos.find(contato => {
-      const nomeContatoNorm = normalizarTexto(contato.nome);
-      return (
-        nomeContatoNorm === nomeMarcaNorm ||               // Igual
-        nomeContatoNorm.startsWith(nomeMarcaNorm) ||       // Começa com
-        nomeContatoNorm.includes(nomeMarcaNorm)            // Contém
-      );
-    });
+      const pageData = data._embedded?.contatos || [];
+      fornecedores.push(...pageData);
 
-    if (fornecedor) {
-      console.log(`✅ Fornecedor encontrado: ${fornecedor.nome} (ID: ${fornecedor.id})`);
-      return fornecedor.id;
-    } else {
-      console.warn(`❌ Nenhum fornecedor compatível com marca: ${nomeMarca}`);
-      return null;
+      const totalPages = data.page?.totalPages || 1;
+      if (page >= totalPages) break;
+      page++;
     }
 
+    console.log(`📦 ${fornecedores.length} fornecedores carregados da Tiny`);
+    return fornecedores;
   } catch (err) {
     console.error('❌ Erro ao buscar fornecedores:', err.response?.data || err.message);
-    return null;
+    return [];
   }
 }
 
-module.exports = { getFornecedorIdPorNome };
+module.exports = { listarTodosFornecedores };
