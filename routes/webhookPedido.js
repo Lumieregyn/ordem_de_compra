@@ -25,9 +25,9 @@ async function listarTodosFornecedores() {
 
       const contatosPagina = response.data._embedded?.contatos || [];
 
-      // ✅ Filtra localmente apenas fornecedores
+      // ✅ Filtra por tipoContato === 'fornecedor'
       const fornecedoresPagina = contatosPagina.filter(c => 
-        c.tipoPessoa?.nome?.toLowerCase() === 'fornecedor'
+        c.tipoContato?.toLowerCase() === 'fornecedor'
       );
 
       todos.push(...fornecedoresPagina);
