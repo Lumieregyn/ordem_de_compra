@@ -3,10 +3,6 @@ const { getAccessToken } = require('./tokenService');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 
-/**
- * Lista todos os fornecedores registrados na Tiny ERP via API v3
- * Retorna um array de objetos com no mínimo: id, nome
- */
 async function listarTodosFornecedores() {
   const token = getAccessToken();
   if (!token) {
@@ -23,23 +19,22 @@ async function listarTodosFornecedores() {
       const response = await axios.get(`${TINY_API_V3_BASE}/contatos`, {
         headers: { Authorization: `Bearer ${token}` },
         params: {
-          tipo: 'fornecedor',
+          // tipo: 'fornecedor', ← ⚠️ REMOVIDO
           page,
           size: pageSize
         }
       });
 
-      const data = response.data;
-
-      const pageData = data._embedded?.contatos || [];
+      const pageData = response.data?._embedded?.contatos || [];
       fornecedores.push(...pageData);
 
-      const totalPages = data.page?.totalPages || 1;
+      const totalPages = response.data?.page?.totalPages || 1;
       if (page >= totalPages) break;
       page++;
     }
 
-    console.log(`📦 ${fornecedores.length} fornecedores carregados da Tiny`);
+    console.log(`📦 ${fornecedores.length} contatos carregados da Tiny`);
+
     return fornecedores;
   } catch (err) {
     console.error('❌ Erro ao buscar fornecedores:', err.response?.data || err.message);
