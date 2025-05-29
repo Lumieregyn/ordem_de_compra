@@ -4,7 +4,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// 🔍 Inferência de marca a partir de um produto isolado (ex: testar-marca-ia/:id)
+// ✅ Continua funcionando para testes individuais
 async function inferirMarcaViaIA(produto) {
   const prompt = `
 Você é uma IA que analisa dados de produtos de um ERP (Tiny) e tenta inferir a marca do produto com base nos dados disponíveis.
@@ -30,30 +30,38 @@ Responda apenas com o nome da marca inferida. Se não conseguir inferir, respond
   }
 }
 
-// 🧠 Análise completa de pedido com decisão de OC por item
-async function analisarPedidoViaIA(pedidoJsonCompleto) {
+// ✅ Agora com inteligência de escolha de fornecedor
+async function analisarPedidoViaIA({ produto, quantidade, valorUnitario, marca }, fornecedores) {
+  const nomesFornecedores = fornecedores.map(f => `- ${f.nome}`).join('\n');
+
   const prompt = `
-Você é uma IA que analisa um pedido de venda em JSON e responde apenas com um JSON estruturado conforme abaixo.
+Você é uma IA que analisa um item de pedido para decidir se deve ou não gerar uma Ordem de Compra.
 
-### IMPORTANTE:
-- Responda SOMENTE com o JSON, sem comentários ou explicações
-- NÃO coloque texto antes ou depois do JSON
-- Utilize esse formato EXATO:
+Com base no nome da marca do produto e na lista de fornecedores disponíveis, indique o fornecedor mais compatível.
 
+### Lista de fornecedores disponíveis:
+${nomesFornecedores}
+
+### Produto:
+${JSON.stringify(produto, null, 2)}
+
+### Responda apenas com o seguinte JSON:
 {
   "itens": [
     {
-      "produtoSKU": "string",
+      "produtoSKU": "${produto.sku || ''}",
+      "marca": "${marca || 'Desconhecida'}",
+      "fornecedor": "NOME EXATO DO FORNECEDOR ACIMA",
       "deveGerarOC": true,
-      "marca": "string",
-      "fornecedor": "string",
-      "motivo": "string"
+      "motivo": "Motivo lógico da decisão"
     }
   ]
 }
 
-Abaixo está o pedido para análise:
-${JSON.stringify(pedidoJsonCompleto, null, 2)}
+⚠️ Regras:
+- Escolha o nome mais compatível com a marca do produto
+- Se nenhum nome bater, preencha fornecedor como "Não encontrado"
+- NUNCA invente nomes fora da lista
 `;
 
   try {
@@ -64,11 +72,8 @@ ${JSON.stringify(pedidoJsonCompleto, null, 2)}
     });
 
     const text = completion.choices[0].message.content.trim();
+    console.log('🔍 RESPOSTA DA IA:', text);
 
-    // 🔍 DEBUG: log da IA (pode ver isso nos logs do Railway)
-    console.log('🔎 RESPOSTA DA IA:', text);
-
-    // Força extração do JSON, mesmo que a IA adicione algum texto extra
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
     const jsonString = text.substring(start, end + 1);
