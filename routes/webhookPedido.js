@@ -8,6 +8,11 @@ const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const axios = require('axios');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
+const MAX_PAGINAS = 100;
+
+async function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 async function listarTodosFornecedores() {
   const token = getAccessToken();
@@ -18,7 +23,7 @@ async function listarTodosFornecedores() {
   const limit = 50;
 
   try {
-    while (true) {
+    while (page <= MAX_PAGINAS) {
       const response = await axios.get(`${TINY_API_V3_BASE}/contatos?page=${page}&limit=${limit}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -32,9 +37,9 @@ async function listarTodosFornecedores() {
       todos.push(...fornecedoresPagina);
 
       page++;
+      await delay(300); // Delay para evitar erro 429
     }
 
-    // Deduplicar por ID
     const fornecedoresUnicos = Array.from(new Map(todos.map(f => [f.id, f])).values());
     console.log('📋 Fornecedores disponíveis:', fornecedoresUnicos.map(f => f.nome));
     return fornecedoresUnicos;
@@ -65,7 +70,20 @@ router.post('/', async (req, res) => {
         continue;
       }
 
-      const produto = await getProdutoFromTinyV3(produtoId);
+      let produto;
+      try {
+        produto = await getProdutoFromTinyV3(produtoId);
+      } catch (err) {
+        console.error(`❌ Erro ao buscar produto ID ${produtoId}:`, err.message);
+        resultados.push({ produtoId, status: 'erro ao buscar produto', erro: err.message });
+        continue;
+      }
+
+      if (!produto) {
+        resultados.push({ produtoId, status: 'produto não encontrado (null)' });
+        continue;
+      }
+
       const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
       console.log('🔎 SKU detectado:', sku);
 
