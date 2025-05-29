@@ -1,10 +1,6 @@
 const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
 
-/**
- * Retorna a lista de fornecedores ativos cadastrados na Tiny.
- * Assumimos que fornecedores são contatos com tag ou nome associado à marca.
- */
 async function listarFornecedoresTiny() {
   const token = getAccessToken();
   if (!token) {
@@ -18,6 +14,8 @@ async function listarFornecedoresTiny() {
 
   try {
     while (true) {
+      console.log(`🔄 Buscando fornecedores - Página ${pagina}`);
+
       const resp = await axios.get('https://erp.tiny.com.br/public-api/v3/contatos', {
         headers: { Authorization: `Bearer ${token}` },
         params: {
@@ -26,25 +24,31 @@ async function listarFornecedoresTiny() {
         }
       });
 
-      const itens = resp.data?.itens || [];
+      if (!resp.data || !Array.isArray(resp.data.itens)) {
+        console.warn('⚠️ Estrutura inesperada no retorno da API de fornecedores:', resp.data);
+        break;
+      }
+
+      const itens = resp.data.itens;
       if (itens.length === 0) break;
 
       for (const item of itens) {
-        const contato = item;
-        // Aqui você pode filtrar fornecedores por regra específica (tags, nomes, etc.)
         fornecedores.push({
-          id: contato.id,
-          nome: contato.nome
+          id: item.id,
+          nome: item.nome
         });
       }
 
       pagina++;
 
-      // Delay para evitar 429
+      // ⏱️ Delay para evitar erro 429
       await new Promise(res => setTimeout(res, 1000));
+
+      // 🔍 Remover este if para modo completo
+      if (pagina > 3) break; // ⚠️ LIMITADOR DE TESTE — remova em produção
     }
 
-    console.log(`📦 ${fornecedores.length} fornecedores carregados da Tiny`);
+    console.log(`✅ ${fornecedores.length} fornecedores carregados da Tiny`);
     return fornecedores;
   } catch (err) {
     console.error('❌ Erro ao buscar fornecedores da Tiny:', err.response?.data || err.message);
