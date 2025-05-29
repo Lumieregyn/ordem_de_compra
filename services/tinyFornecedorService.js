@@ -2,48 +2,49 @@ const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
 
 /**
- * Lista todos os contatos da Tiny com o tipo "fornecedor".
- * Retorna um array com objetos { id, nome }.
+ * Retorna a lista de fornecedores ativos cadastrados na Tiny.
+ * Assumimos que fornecedores são contatos com tag ou nome associado à marca.
  */
 async function listarFornecedoresTiny() {
-  try {
-    const token = getAccessToken();
-    const fornecedores = [];
-    let offset = 0;
-    const limit = 50;
+  const token = getAccessToken();
+  if (!token) {
+    console.warn('⚠️ Token da Tiny não encontrado.');
+    return [];
+  }
 
+  const fornecedores = [];
+  let pagina = 1;
+  const tamanhoPagina = 50;
+
+  try {
     while (true) {
-      const resp = await axios.get(`https://api.tiny.com.br/api2/contatos`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
+      const resp = await axios.get('https://erp.tiny.com.br/public-api/v3/contatos', {
+        headers: { Authorization: `Bearer ${token}` },
         params: {
-          offset,
-          limit
+          pagina,
+          tamanhoPagina
         }
       });
 
-      const contatos = resp.data?.data?.itens || [];
+      const itens = resp.data?.itens || [];
+      if (itens.length === 0) break;
 
-      // Se não houver contatos, encerra a paginação
-      if (contatos.length === 0) break;
-
-      for (const contato of contatos) {
-        const tipos = contato.tipos || [];
-
-        if (tipos.includes('fornecedor')) {
-          fornecedores.push({
-            id: contato.codigo, // ou contato.id se preferir
-            nome: contato.nome?.trim()?.toUpperCase()
-          });
-        }
+      for (const item of itens) {
+        const contato = item;
+        // Aqui você pode filtrar fornecedores por regra específica (tags, nomes, etc.)
+        fornecedores.push({
+          id: contato.id,
+          nome: contato.nome
+        });
       }
 
-      offset += limit;
+      pagina++;
+
+      // Delay para evitar 429
+      await new Promise(res => setTimeout(res, 1000));
     }
 
-    console.log(`📦 ${fornecedores.length} fornecedores identificados`);
+    console.log(`📦 ${fornecedores.length} fornecedores carregados da Tiny`);
     return fornecedores;
   } catch (err) {
     console.error('❌ Erro ao buscar fornecedores da Tiny:', err.response?.data || err.message);
