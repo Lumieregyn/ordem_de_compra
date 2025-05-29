@@ -33,6 +33,7 @@ router.post('/', async (req, res) => {
     }
 
     const fornecedores = await listarTodosFornecedores();
+    console.log('📋 Fornecedores disponíveis:', fornecedores.map(f => f.nome));
     const resultados = [];
 
     for (const item of pedido.itens) {
