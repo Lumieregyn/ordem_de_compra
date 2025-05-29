@@ -27,12 +27,12 @@ async function listarTodosFornecedores() {
 
       console.log('🧾 Contatos recebidos (bruto):', contatosPagina.map(c => ({
         nome: c.nome,
-        tipoContato: c.tipoContato,
         tipoPessoa: c.tipoPessoa
       })));
 
-      const fornecedoresPagina = contatosPagina.filter(c => 
-        c.tipoContato?.toLowerCase() === 'fornecedor'
+      // Fallback: inclui contatos cujo nome contenha "nordecor"
+      const fornecedoresPagina = contatosPagina.filter(c =>
+        c.nome?.toLowerCase().includes('nordecor')
       );
 
       todos.push(...fornecedoresPagina);
