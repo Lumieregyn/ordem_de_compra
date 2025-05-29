@@ -28,9 +28,9 @@ async function enviarOrdemCompra({ produtoId, quantidade, valorUnitario, idForne
 </pedido>`.trim();
 
   const body = qs.stringify({
-    xml,
     token: TINY_API_TOKEN,
-    formato: 'json'
+    formato: 'json',
+    xml // <-- parâmetro corretamente enviado
   });
 
   try {
@@ -46,7 +46,7 @@ async function enviarOrdemCompra({ produtoId, quantidade, valorUnitario, idForne
     console.log('📥 Resposta da Tiny:', response.data);
     return response.data;
   } catch (err) {
-    console.error('❌ Erro ao enviar OC:', err.response?.data || err.message);
+    console.error('❌ Erro ao enviar OC:', JSON.stringify(err.response?.data || err.message, null, 2));
     return { erro: true, detalhe: err.response?.data || err.message };
   }
 }
