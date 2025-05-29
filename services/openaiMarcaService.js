@@ -1,91 +1,81 @@
-const OpenAI = require('openai');
+const { OpenAI } = require('openai');
+const { listarTodosFornecedores } = require('./tinyFornecedorService');
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ✅ Continua funcionando para testes individuais
-async function inferirMarcaViaIA(produto) {
-  const prompt = `
-Você é uma IA que analisa dados de produtos de um ERP (Tiny) e tenta inferir a marca do produto com base nos dados disponíveis.
-
-Abaixo está o JSON do produto:
-${JSON.stringify(produto, null, 2)}
-
-Responda apenas com o nome da marca inferida. Se não conseguir inferir, responda "Desconhecida".
-`;
-
-  try {
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.2,
-    });
-
-    const marca = completion.choices[0].message.content.trim();
-    return marca;
-  } catch (err) {
-    console.error('❌ Erro na inferência de marca via IA:', err.message);
-    return null;
-  }
+function normalizarTexto(texto) {
+  return texto?.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
 }
 
-// ✅ Agora com inteligência de escolha de fornecedor
-async function analisarPedidoViaIA({ produto, quantidade, valorUnitario, marca }, fornecedores) {
-  const nomesFornecedores = fornecedores.map(f => `- ${f.nome}`).join('\n');
+async function inferirMarcaViaIA(produto) {
+  try {
+    const fornecedores = await listarTodosFornecedores();
+    const nomesFornecedores = fornecedores.map(f => f.nome).filter(Boolean);
 
-  const prompt = `
-Você é uma IA que analisa um item de pedido para decidir se deve ou não gerar uma Ordem de Compra.
+    const prompt = `
+Você é um sistema inteligente que analisa JSONs de produtos para determinar a marca e o fornecedor.
 
-Com base no nome da marca do produto e na lista de fornecedores disponíveis, indique o fornecedor mais compatível.
+🎯 Objetivo:
+- Identificar a marca do produto.
+- Verificar se a marca corresponde a algum fornecedor.
+- Indicar se deve ser gerada uma ordem de compra (deveGerarOC: true).
+- O nome da marca SEMPRE será igual ao nome do fornecedor.
 
-### Lista de fornecedores disponíveis:
-${nomesFornecedores}
+📌 Regras:
+- Compare o campo "marca" com os nomes abaixo.
+- Se encontrar compatibilidade exata ou semelhante, associe como fornecedor.
+- Se não encontrar, retorne deveGerarOC: false e explique no motivo.
 
-### Produto:
+🧾 Lista de fornecedores disponíveis:
+${nomesFornecedores.map((f, i) => `  ${i + 1}. ${f}`).join('\n')}
+
+📦 Produto recebido (JSON):
 ${JSON.stringify(produto, null, 2)}
 
-### Responda apenas com o seguinte JSON:
+📤 Responda apenas no seguinte formato JSON:
 {
   "itens": [
     {
-      "produtoSKU": "${produto.sku || ''}",
-      "marca": "${marca || 'Desconhecida'}",
-      "fornecedor": "NOME EXATO DO FORNECEDOR ACIMA",
-      "deveGerarOC": true,
-      "motivo": "Motivo lógico da decisão"
+      "produtoSKU": "<sku>",
+      "marca": "<marca inferida ou extraída>",
+      "fornecedor": "<nome completo do fornecedor>",
+      "deveGerarOC": true | false,
+      "motivo": "<explicação curta>"
     }
   ]
 }
-
-⚠️ Regras:
-- Escolha o nome mais compatível com a marca do produto
-- Se nenhum nome bater, preencha fornecedor como "Não encontrado"
-- NUNCA invente nomes fora da lista
 `;
 
-  try {
-    const completion = await openai.chat.completions.create({
+    const resposta = await openai.chat.completions.create({
       model: 'gpt-4',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.2,
+      temperature: 0.3,
+      messages: [
+        { role: 'system', content: 'Você é um analisador de marca e fornecedor para produtos.' },
+        { role: 'user', content: prompt }
+      ]
     });
 
-    const text = completion.choices[0].message.content.trim();
-    console.log('🔍 RESPOSTA DA IA:', text);
+    const texto = resposta.choices[0]?.message?.content?.trim();
+    const json = JSON.parse(texto);
 
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    const jsonString = text.substring(start, end + 1);
-
-    return JSON.parse(jsonString);
+    return json;
   } catch (err) {
-    console.error('❌ Erro ao interpretar resposta da IA:', err.message);
-    return { erro: 'Resposta inválida da IA' };
+    console.error('❌ Erro ao inferir marca via IA:', err.message);
+    return {
+      itens: [
+        {
+          produtoSKU: produto?.sku || '',
+          marca: 'N/A',
+          fornecedor: 'N/A',
+          deveGerarOC: false,
+          motivo: 'Resposta inválida da IA'
+        }
+      ]
+    };
   }
 }
 
-module.exports = {
-  inferirMarcaViaIA,
-  analisarPedidoViaIA
-};
+module.exports = { inferirMarcaViaIA };
