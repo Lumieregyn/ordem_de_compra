@@ -1,4 +1,3 @@
-// Nova versão completa de services/tinyFornecedorService.js
 const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
 
@@ -7,7 +6,7 @@ const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 function normalizarTexto(str) {
   return str
     ?.normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
 }
