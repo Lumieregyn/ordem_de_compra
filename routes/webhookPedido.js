@@ -42,8 +42,10 @@ async function listarTodosFornecedores() {
 
       console.log(`📄 Página ${page} - Contatos: ${contatosPagina.length}`);
 
-      // Apenas fornecedores do tipo pessoa jurídica
-      const fornecedoresPagina = contatosPagina.filter(c => c.tipoPessoa === 'J');
+      // Apenas PJ com nomes válidos
+      const fornecedoresPagina = contatosPagina.filter(c =>
+        c.tipoPessoa === 'J' && c.nome && c.nome.trim().length > 3
+      );
       todos.push(...fornecedoresPagina);
 
       page++;
@@ -104,7 +106,11 @@ router.post('/', async (req, res) => {
       }
 
       const marcaNormalizada = normalizarTexto(marca);
-      const fornecedorMatchDireto = fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNormalizada));
+
+      // 🔍 Match direto antes de IA
+      const fornecedorMatchDireto = fornecedores.find(f =>
+        normalizarTexto(f.nome).includes(marcaNormalizada)
+      );
 
       if (fornecedorMatchDireto) {
         console.log('✅ Match direto encontrado:', fornecedorMatchDireto.nome);
@@ -124,8 +130,14 @@ router.post('/', async (req, res) => {
         continue;
       }
 
+      // 🔎 Filtro de fornecedores com relação textual à marca
+      const fornecedoresFiltrados = fornecedores.filter(f =>
+        normalizarTexto(f.nome).includes(marcaNormalizada) ||
+        marcaNormalizada.includes(normalizarTexto(f.nome))
+      );
+
       console.log('🔍 Marca identificada:', marca);
-      console.log('🧠 Fornecedores entregues à IA:', fornecedores.map(f => f.nome));
+      console.log('🧠 Fornecedores entregues à IA:', fornecedoresFiltrados.map(f => f.nome));
 
       let respostaIA;
       try {
@@ -134,7 +146,7 @@ router.post('/', async (req, res) => {
           quantidade,
           valorUnitario,
           marca
-        }, fornecedores);
+        }, fornecedoresFiltrados);
       } catch (err) {
         console.error('❌ Erro na inferência IA:', err.message);
         return res.status(500).json({ erro: 'Erro na análise da IA' });
