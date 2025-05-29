@@ -14,6 +14,15 @@ async function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function normalizarTexto(txt) {
+  return txt
+    ?.normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 async function listarTodosFornecedores() {
   const token = getAccessToken();
   if (!token) return [];
@@ -33,11 +42,12 @@ async function listarTodosFornecedores() {
 
       console.log(`📄 Página ${page} - Contatos: ${contatosPagina.length}`);
 
+      // Apenas fornecedores do tipo pessoa jurídica
       const fornecedoresPagina = contatosPagina.filter(c => c.tipoPessoa === 'J');
       todos.push(...fornecedoresPagina);
 
       page++;
-      await delay(300); // Delay para evitar erro 429
+      await delay(300);
     }
 
     const fornecedoresUnicos = Array.from(new Map(todos.map(f => [f.id, f])).values());
@@ -90,6 +100,27 @@ router.post('/', async (req, res) => {
       const marca = produto.marca?.nome?.trim();
       if (!marca) {
         resultados.push({ produtoSKU: sku, status: 'marca ausente' });
+        continue;
+      }
+
+      const marcaNormalizada = normalizarTexto(marca);
+      const fornecedorMatchDireto = fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNormalizada));
+
+      if (fornecedorMatchDireto) {
+        console.log('✅ Match direto encontrado:', fornecedorMatchDireto.nome);
+        const respostaOC = await enviarOrdemCompra({
+          produtoId,
+          quantidade,
+          valorUnitario,
+          idFornecedor: fornecedorMatchDireto.id
+        });
+
+        resultados.push({
+          produtoSKU: sku,
+          fornecedor: fornecedorMatchDireto.nome,
+          ocCriada: true,
+          ocInfo: respostaOC || null
+        });
         continue;
       }
 
