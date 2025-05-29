@@ -5,10 +5,25 @@ const { getProdutoFromTinyV3 } = require('../services/tinyProductService');
 const { getAccessToken } = require('../services/tokenService');
 const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
-const { getFornecedorIdPorNome } = require('../services/tinyFornecedorService');
 const axios = require('axios');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
+
+async function listarTodosFornecedores() {
+  const token = getAccessToken();
+  if (!token) return [];
+
+  try {
+    const response = await axios.get(`${TINY_API_V3_BASE}/contatos`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    return response.data._embedded?.contatos || [];
+  } catch (err) {
+    console.error('❌ Erro ao buscar fornecedores:', err.message);
+    return [];
+  }
+}
 
 router.post('/', async (req, res) => {
   try {
@@ -17,6 +32,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ erro: 'Pedido inválido ou sem itens.' });
     }
 
+    const fornecedores = await listarTodosFornecedores();
     const resultados = [];
 
     for (const item of pedido.itens) {
@@ -39,28 +55,26 @@ router.post('/', async (req, res) => {
         continue;
       }
 
-      const idFornecedor = await getFornecedorIdPorNome(marca);
-      if (!idFornecedor) {
-        resultados.push({
-          produtoSKU: sku,
-          status: 'fornecedor não encontrado',
-          marca
-        });
-        continue;
-      }
-
-      // ⚙️ Análise da IA
+      // ⚙️ Análise da IA com fornecedores reais
       const respostaIA = await analisarPedidoViaIA({
         produto,
         quantidade,
         valorUnitario,
-        marca,
-        fornecedor: marca
-      });
+        marca
+      }, fornecedores);
 
       const itemIA = respostaIA?.itens?.[0];
       if (!itemIA) {
         resultados.push({ produtoSKU: sku, status: 'resposta inválida da IA' });
+        continue;
+      }
+
+      if (!itemIA.idFornecedor) {
+        resultados.push({
+          produtoSKU: sku,
+          status: 'IA não encontrou fornecedor compatível',
+          motivo: itemIA?.motivo || 'não especificado'
+        });
         continue;
       }
 
@@ -69,28 +83,28 @@ router.post('/', async (req, res) => {
           produtoId,
           quantidade,
           valorUnitario,
-          idFornecedor
+          idFornecedor: itemIA.idFornecedor
         });
 
         const respostaOC = await enviarOrdemCompra({
           produtoId,
           quantidade,
           valorUnitario,
-          idFornecedor
+          idFornecedor: itemIA.idFornecedor
         });
 
         console.log('📥 Resposta da Tiny:', respostaOC);
 
         resultados.push({
           produtoSKU: sku,
-          fornecedor: marca,
+          fornecedor: itemIA.nomeFornecedor,
           ocCriada: true,
           ocInfo: respostaOC || null
         });
       } else {
         resultados.push({
           produtoSKU: sku,
-          fornecedor: marca,
+          fornecedor: itemIA.nomeFornecedor,
           ocCriada: false,
           motivo: itemIA?.motivo || 'IA recusou'
         });
