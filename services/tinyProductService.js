@@ -3,7 +3,6 @@ const { getAccessToken } = require('./tokenService');
 
 /**
  * Lista todos os produtos da Tiny usando a API v3.
- * Retorna array com id, sku e marca.
  */
 async function listarProdutosTiny() {
   const token = getAccessToken();
@@ -27,7 +26,6 @@ async function listarProdutosTiny() {
       });
 
       const itens = resp.data?.itens || [];
-
       if (itens.length === 0) break;
 
       for (const item of itens) {
@@ -49,6 +47,30 @@ async function listarProdutosTiny() {
   }
 }
 
+/**
+ * Busca um produto individual da Tiny v3 via ID.
+ * Usado para testar marca via rota /testar-marca-ia/:id
+ */
+async function getProdutoFromTinyV3(produtoId) {
+  const token = getAccessToken();
+  if (!token) {
+    console.warn('⚠️ Token da Tiny não encontrado.');
+    return null;
+  }
+
+  try {
+    const resp = await axios.get(`https://erp.tiny.com.br/public-api/v3/produtos/${produtoId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    return resp.data;
+  } catch (err) {
+    console.error(`❌ Erro ao buscar produto ID ${produtoId}:`, err.response?.data || err.message);
+    return null;
+  }
+}
+
 module.exports = {
-  listarProdutosTiny
+  listarProdutosTiny,
+  getProdutoFromTinyV3
 };
