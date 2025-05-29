@@ -23,7 +23,7 @@ async function listarTodosFornecedores() {
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      const contatosPagina = response.data._embedded?.contatos || [];
+     const contatosPagina = response.data.itens || [];
 
       console.log('🧾 Contatos recebidos (bruto):', contatosPagina.map(c => ({
         nome: c.nome,
