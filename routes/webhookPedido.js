@@ -25,7 +25,12 @@ async function listarTodosFornecedores() {
 
       const contatosPagina = response.data._embedded?.contatos || [];
 
-      // ✅ Filtra por tipoContato === 'fornecedor'
+      console.log('🧾 Contatos recebidos (bruto):', contatosPagina.map(c => ({
+        nome: c.nome,
+        tipoContato: c.tipoContato,
+        tipoPessoa: c.tipoPessoa
+      })));
+
       const fornecedoresPagina = contatosPagina.filter(c => 
         c.tipoContato?.toLowerCase() === 'fornecedor'
       );
