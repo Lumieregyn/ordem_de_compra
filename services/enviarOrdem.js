@@ -5,14 +5,9 @@ const TINY_API_TOKEN = process.env.TINY_API_TOKEN;
 
 /**
  * Envia uma ordem de compra para a Tiny via XML
- * @param {Object} params
- * @param {number} params.produtoId
- * @param {number} params.quantidade
- * @param {number} params.valorUnitario
- * @param {number} params.idFornecedor
  */
 async function enviarOrdemCompra({ produtoId, quantidade, valorUnitario, idFornecedor }) {
-  const xml = `
+  const xmlContent = `
 <pedido>
   <tipo>Ordem de Compra</tipo>
   <fornecedor>
@@ -27,18 +22,20 @@ async function enviarOrdemCompra({ produtoId, quantidade, valorUnitario, idForne
   </itens>
 </pedido>`.trim();
 
-  const body = qs.stringify({
+  const payload = qs.stringify({
     token: TINY_API_TOKEN,
     formato: 'json',
-    xml // <-- parâmetro corretamente enviado
-  });
+    xml: xmlContent
+  }, { encode: false }); // <-- chave para evitar dupla codificação
 
   try {
     const response = await axios.post(
       'https://api.tiny.com.br/api2/pedido.incluir.php',
-      body,
+      payload,
       {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
       }
     );
 
