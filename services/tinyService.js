@@ -1,6 +1,5 @@
- const axios = require('axios');
+const axios = require('axios');
 const pLimit = require('p-limit');
-const { getProdutosCollection } = require('./mongoClient');
 const { getAccessToken } = require('./tokenService');
 const { inferirMarcaViaIA } = require('./aiBrandInferenceService');
 
@@ -99,29 +98,6 @@ async function fetchMarcaV3(produtoId, marcasConhecidas = [], retries = MAX_RETR
   }
 }
 
-async function salvarOuAtualizarProduto({ codigo, nome, marca }) {
-  if (!codigo || !nome) return;
-
-  try {
-    const collection = getProdutosCollection();
-    await collection.updateOne(
-      { codigo },
-      {
-        $set: {
-          nome,
-          marca: marca || null,
-          atualizado_em: new Date().toISOString()
-        }
-      },
-      { upsert: true }
-    );
-
-    console.log(`💾 Produto salvo: ${codigo} | Marca: ${marca || 'N/A'}`);
-  } catch (err) {
-    console.error(`❌ Erro ao salvar produto ${codigo}:`, err);
-  }
-}
-
 async function processarProdutosTiny() {
   let pagina = 1;
   let totalProdutos = 0;
@@ -129,9 +105,7 @@ async function processarProdutosTiny() {
   const inicio = Date.now();
   const limit = pLimit(CONCURRENCY);
   const contagemMarcas = {};
-
-  const marcasConhecidas = await getProdutosCollection()
-    .distinct('marca', { marca: { $ne: null } });
+  const marcasConhecidas = []; // Agora sem Mongo
 
   while (true) {
     const response = await axios.post(API_V2_LIST_URL, null, {
@@ -167,8 +141,6 @@ async function processarProdutosTiny() {
           marcasPagina.add(marca);
           contagemMarcas[marca] = (contagemMarcas[marca] || 0) + 1;
         }
-
-        await salvarOuAtualizarProduto({ codigo, nome: nome?.trim(), marca });
       })
     );
 
