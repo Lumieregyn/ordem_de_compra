@@ -1,9 +1,8 @@
-const { Configuration, OpenAIApi } = require('openai');
+const OpenAI = require('openai');
 
-const configuration = new Configuration({
-  apiKey: process.env.OPENAI_API_KEY,
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
 });
-const openai = new OpenAIApi(configuration);
 
 // IA que infere marca a partir de um produto isolado
 async function inferirMarcaViaIA(produto) {
@@ -17,13 +16,13 @@ Responda apenas com o nome da marca inferida. Se não conseguir inferir, respond
 `;
 
   try {
-    const completion = await openai.createChatCompletion({
+    const completion = await openai.chat.completions.create({
       model: 'gpt-4',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.2,
     });
 
-    const marca = completion.data.choices[0].message.content.trim();
+    const marca = completion.choices[0].message.content.trim();
     return marca;
   } catch (err) {
     console.error('❌ Erro na inferência de marca via IA:', err.message);
@@ -61,13 +60,13 @@ ${JSON.stringify(pedidoJsonCompleto, null, 2)}
 `;
 
   try {
-    const completion = await openai.createChatCompletion({
+    const completion = await openai.chat.completions.create({
       model: 'gpt-4',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.2,
     });
 
-    const text = completion.data.choices[0].message.content;
+    const text = completion.choices[0].message.content;
     const resposta = JSON.parse(text);
     return resposta;
   } catch (err) {
