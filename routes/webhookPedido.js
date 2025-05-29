@@ -5,11 +5,21 @@ const { getProdutoFromTinyV3 } = require('../services/tinyProductService');
 const { getAccessToken } = require('../services/tokenService');
 const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
-
 const axios = require('axios');
+
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 
-// Buscar todos os contatos (fornecedores disponíveis)
+// 🔧 Normalização para comparação de texto
+function normalizarTexto(txt) {
+  return txt
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .replace(/[^a-zA-Z0-9]/g, '')    // remove símbolos e espaços
+    .toLowerCase()
+    .trim();
+}
+
+// 📦 Buscar todos os contatos (fornecedores)
 async function listarTodosFornecedores() {
   const token = getAccessToken();
   if (!token) return [];
@@ -21,7 +31,7 @@ async function listarTodosFornecedores() {
 
     return response.data._embedded?.contatos || [];
   } catch (err) {
-    console.error('❌ Erro ao buscar lista de fornecedores:', err.message);
+    console.error('❌ Erro ao buscar fornecedores:', err.message);
     return [];
   }
 }
@@ -47,24 +57,21 @@ router.post('/', async (req, res) => {
       }
 
       const produto = await getProdutoFromTinyV3(produtoId);
-      const sku = produto.sku;
-      const marca = produto.marca?.nome?.trim();
+      const sku = produto.sku || '';
+      const marca = produto.marca?.nome?.trim() || 'Desconhecida';
 
       if (!marca) {
         resultados.push({ produtoSKU: sku, status: 'marca ausente' });
         continue;
       }
 
-      // IA analisa e decide
-      const respostaIA = await analisarPedidoViaIA({
-        produto,
-        quantidade,
-        valorUnitario,
-        marca
-      }, fornecedores);
+      // 🔎 IA analisa o item e decide
+      const respostaIA = await analisarPedidoViaIA(
+        { produto, quantidade, valorUnitario, marca },
+        fornecedores
+      );
 
       const itemIA = respostaIA?.itens?.[0];
-
       if (!itemIA) {
         resultados.push({ produtoSKU: sku, status: 'resposta inválida da IA' });
         continue;
@@ -72,7 +79,7 @@ router.post('/', async (req, res) => {
 
       const nomeFornecedorIA = itemIA.fornecedor;
       const fornecedorMatch = fornecedores.find(f =>
-        f.nome.toLowerCase().trim() === nomeFornecedorIA?.toLowerCase().trim()
+        normalizarTexto(f.nome) === normalizarTexto(nomeFornecedorIA)
       );
 
       if (!fornecedorMatch) {
