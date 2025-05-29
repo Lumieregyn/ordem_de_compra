@@ -4,7 +4,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// IA que infere marca a partir de um produto isolado
+// 🔍 Inferência de marca a partir de um produto isolado (ex: testar-marca-ia/:id)
 async function inferirMarcaViaIA(produto) {
   const prompt = `
 Você é uma IA que analisa dados de produtos de um ERP (Tiny) e tenta inferir a marca do produto com base nos dados disponíveis.
@@ -30,32 +30,29 @@ Responda apenas com o nome da marca inferida. Se não conseguir inferir, respond
   }
 }
 
-// IA que analisa um pedido completo e decide sobre Ordem de Compra
+// 🧠 Análise completa de pedido com decisão de OC por item
 async function analisarPedidoViaIA(pedidoJsonCompleto) {
   const prompt = `
-Você é um sistema de inteligência artificial que analisa pedidos de venda no ERP Tiny.
+Você é uma IA que analisa um pedido de venda em JSON e responde apenas com um JSON estruturado conforme abaixo.
 
-Com base nos dados abaixo, para cada item diga:
-- Se deve gerar uma ordem de compra (true/false)
-- O motivo da decisão
-- O nome da marca
-- O nome do fornecedor
-- O SKU (ou identificador do produto)
+### IMPORTANTE:
+- Responda SOMENTE com o JSON, sem comentários ou explicações
+- NÃO coloque texto antes ou depois do JSON
+- Utilize esse formato EXATO:
 
-Responda em JSON com a estrutura:
 {
   "itens": [
     {
-      "produtoSKU": "...",
+      "produtoSKU": "string",
       "deveGerarOC": true,
-      "marca": "...",
-      "fornecedor": "...",
-      "motivo": "..."
+      "marca": "string",
+      "fornecedor": "string",
+      "motivo": "string"
     }
   ]
 }
 
-Abaixo está o JSON do pedido:
+Abaixo está o pedido para análise:
 ${JSON.stringify(pedidoJsonCompleto, null, 2)}
 `;
 
@@ -66,9 +63,17 @@ ${JSON.stringify(pedidoJsonCompleto, null, 2)}
       temperature: 0.2,
     });
 
-    const text = completion.choices[0].message.content;
-    const resposta = JSON.parse(text);
-    return resposta;
+    const text = completion.choices[0].message.content.trim();
+
+    // 🔍 DEBUG: log da IA (pode ver isso nos logs do Railway)
+    console.log('🔎 RESPOSTA DA IA:', text);
+
+    // Força extração do JSON, mesmo que a IA adicione algum texto extra
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    const jsonString = text.substring(start, end + 1);
+
+    return JSON.parse(jsonString);
   } catch (err) {
     console.error('❌ Erro ao interpretar resposta da IA:', err.message);
     return { erro: 'Resposta inválida da IA' };
@@ -77,5 +82,5 @@ ${JSON.stringify(pedidoJsonCompleto, null, 2)}
 
 module.exports = {
   inferirMarcaViaIA,
-  analisarPedidoViaIA,
+  analisarPedidoViaIA
 };
