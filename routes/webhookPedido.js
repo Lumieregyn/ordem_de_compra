@@ -42,12 +42,15 @@ async function listarTodosFornecedores() {
 
       console.log(`📄 Página ${page} - Contatos: ${contatosPagina.length}`);
 
-      // Apenas PJ com nomes válidos
+      // ✅ Apenas pessoas jurídicas, ativos e fornecedores
       const fornecedoresPagina = contatosPagina.filter(c =>
-        c.tipoPessoa === 'J' && c.nome && c.nome.trim().length > 3
+        c.tipoPessoa === 'J' &&
+        c.nome && c.nome.trim().length > 3 &&
+        c.situacao === 'A' &&
+        (c.tiposContato || []).some(tipo => tipo.nome.toLowerCase().includes('fornecedor'))
       );
-      todos.push(...fornecedoresPagina);
 
+      todos.push(...fornecedoresPagina);
       page++;
       await delay(300);
     }
@@ -107,7 +110,6 @@ router.post('/', async (req, res) => {
 
       const marcaNormalizada = normalizarTexto(marca);
 
-      // 🔍 Match direto antes de IA
       const fornecedorMatchDireto = fornecedores.find(f =>
         normalizarTexto(f.nome).includes(marcaNormalizada)
       );
@@ -130,7 +132,6 @@ router.post('/', async (req, res) => {
         continue;
       }
 
-      // 🔎 Filtro de fornecedores com relação textual à marca
       const fornecedoresFiltrados = fornecedores.filter(f =>
         normalizarTexto(f.nome).includes(marcaNormalizada) ||
         marcaNormalizada.includes(normalizarTexto(f.nome))
@@ -141,12 +142,7 @@ router.post('/', async (req, res) => {
 
       let respostaIA;
       try {
-        respostaIA = await analisarPedidoViaIA({
-          produto,
-          quantidade,
-          valorUnitario,
-          marca
-        }, fornecedoresFiltrados);
+        respostaIA = await analisarPedidoViaIA({ produto, quantidade, valorUnitario, marca }, fornecedoresFiltrados);
       } catch (err) {
         console.error('❌ Erro na inferência IA:', err.message);
         return res.status(500).json({ erro: 'Erro na análise da IA' });
@@ -168,20 +164,8 @@ router.post('/', async (req, res) => {
       }
 
       if (itemIA.deveGerarOC) {
-        console.log('📤 Enviando OC com dados:', {
-          produtoId,
-          quantidade,
-          valorUnitario,
-          idFornecedor: itemIA.idFornecedor
-        });
-
-        const respostaOC = await enviarOrdemCompra({
-          produtoId,
-          quantidade,
-          valorUnitario,
-          idFornecedor: itemIA.idFornecedor
-        });
-
+        console.log('📤 Enviando OC com dados:', { produtoId, quantidade, valorUnitario, idFornecedor: itemIA.idFornecedor });
+        const respostaOC = await enviarOrdemCompra({ produtoId, quantidade, valorUnitario, idFornecedor: itemIA.idFornecedor });
         console.log('📥 Resposta da Tiny:', respostaOC);
 
         resultados.push({
