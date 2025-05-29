@@ -5,36 +5,10 @@ const { getProdutoFromTinyV3 } = require('../services/tinyProductService');
 const { getAccessToken } = require('../services/tokenService');
 const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
+const { getFornecedorIdPorNome } = require('../services/tinyFornecedorService');
 const axios = require('axios');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
-
-// 🔧 Normalização para texto
-function normalizarTexto(txt) {
-  return txt
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9]/g, '')
-    .toLowerCase()
-    .trim();
-}
-
-// 📦 Buscar todos os fornecedores
-async function listarTodosFornecedores() {
-  const token = getAccessToken();
-  if (!token) return [];
-
-  try {
-    const response = await axios.get(`${TINY_API_V3_BASE}/contatos`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-
-    return response.data._embedded?.contatos || [];
-  } catch (err) {
-    console.error('❌ Erro ao buscar fornecedores:', err.message);
-    return [];
-  }
-}
 
 router.post('/', async (req, res) => {
   try {
@@ -43,7 +17,6 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ erro: 'Pedido inválido ou sem itens.' });
     }
 
-    const fornecedores = await listarTodosFornecedores();
     const resultados = [];
 
     for (const item of pedido.itens) {
@@ -60,31 +33,14 @@ router.post('/', async (req, res) => {
       const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
       console.log('🔎 SKU detectado:', sku);
 
-      const marca = produto.marca?.nome?.trim() || 'Desconhecida';
+      const marca = produto.marca?.nome?.trim();
       if (!marca) {
         resultados.push({ produtoSKU: sku, status: 'marca ausente' });
         continue;
       }
 
-      // ⚙️ Análise da IA
-      const respostaIA = await analisarPedidoViaIA(
-        { produto, quantidade, valorUnitario, marca },
-        fornecedores
-      );
-
-      const itemIA = respostaIA?.itens?.[0];
-      if (!itemIA) {
-        resultados.push({ produtoSKU: sku, status: 'resposta inválida da IA' });
-        continue;
-      }
-
-      const nomeFornecedorIA = itemIA.fornecedor;
-      const fornecedorMatch = fornecedores.find(f =>
-        normalizarTexto(f.nome) === normalizarTexto(nomeFornecedorIA)
-      );
-
-      if (!fornecedorMatch) {
-        console.warn(`❌ Nenhum fornecedor compatível com marca: ${nomeFornecedorIA}`);
+      const idFornecedor = await getFornecedorIdPorNome(marca);
+      if (!idFornecedor) {
         resultados.push({
           produtoSKU: sku,
           status: 'fornecedor não encontrado',
@@ -93,35 +49,48 @@ router.post('/', async (req, res) => {
         continue;
       }
 
-      console.log('✅ Fornecedor compatível encontrado:', fornecedorMatch.nome);
+      // ⚙️ Análise da IA
+      const respostaIA = await analisarPedidoViaIA({
+        produto,
+        quantidade,
+        valorUnitario,
+        marca,
+        fornecedor: marca
+      });
+
+      const itemIA = respostaIA?.itens?.[0];
+      if (!itemIA) {
+        resultados.push({ produtoSKU: sku, status: 'resposta inválida da IA' });
+        continue;
+      }
 
       if (itemIA.deveGerarOC) {
         console.log('📤 Enviando OC com dados:', {
           produtoId,
           quantidade,
           valorUnitario,
-          idFornecedor: fornecedorMatch.id
+          idFornecedor
         });
 
         const respostaOC = await enviarOrdemCompra({
           produtoId,
           quantidade,
           valorUnitario,
-          idFornecedor: fornecedorMatch.id
+          idFornecedor
         });
 
         console.log('📥 Resposta da Tiny:', respostaOC);
 
         resultados.push({
           produtoSKU: sku,
-          fornecedor: fornecedorMatch.nome,
+          fornecedor: marca,
           ocCriada: true,
           ocInfo: respostaOC || null
         });
       } else {
         resultados.push({
           produtoSKU: sku,
-          fornecedor: fornecedorMatch.nome,
+          fornecedor: marca,
           ocCriada: false,
           motivo: itemIA?.motivo || 'IA recusou'
         });
