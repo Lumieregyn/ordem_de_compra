@@ -23,14 +23,15 @@ async function listarTodosFornecedores() {
         headers: { Authorization: `Bearer ${token}` }
       });
 
-     const contatosPagina = response.data.itens || [];
+      const contatosPagina = response.data.itens || [];
+      const total = response.data.paginacao?.total || 0;
 
+      console.log('📄 Página', page, '- Contatos:', contatosPagina.length);
       console.log('🧾 Contatos recebidos (bruto):', contatosPagina.map(c => ({
         nome: c.nome,
         tipoPessoa: c.tipoPessoa
       })));
 
-      // 🧠 Heurística para identificar fornecedores
       const fornecedoresPagina = contatosPagina.filter(c =>
         c.tipoPessoa === 'J' && c.nome && (
           c.nome.toLowerCase().includes('ltda') ||
@@ -47,8 +48,7 @@ async function listarTodosFornecedores() {
 
       todos.push(...fornecedoresPagina);
 
-      const temProxima = response.data.page?.totalPages > page;
-      if (!temProxima) break;
+      if (page * limit >= total) break;
       page++;
     }
 
@@ -90,7 +90,6 @@ router.post('/', async (req, res) => {
         continue;
       }
 
-      // ⚙️ Análise da IA com fornecedores reais
       const respostaIA = await analisarPedidoViaIA({
         produto,
         quantidade,
