@@ -30,9 +30,19 @@ async function listarTodosFornecedores() {
         tipoPessoa: c.tipoPessoa
       })));
 
-      // Fallback: inclui contatos cujo nome contenha "nordecor"
+      // 🧠 Heurística para identificar fornecedores
       const fornecedoresPagina = contatosPagina.filter(c =>
-        c.nome?.toLowerCase().includes('nordecor')
+        c.tipoPessoa === 'J' && c.nome && (
+          c.nome.toLowerCase().includes('ltda') ||
+          c.nome.toLowerCase().includes('ilumina') ||
+          c.nome.toLowerCase().includes('engenharia') ||
+          c.nome.toLowerCase().includes('comerc') ||
+          c.nome.toLowerCase().includes('materiais') ||
+          c.nome.toLowerCase().includes('forneced') ||
+          c.nome.toLowerCase().includes('industri') ||
+          c.nome.toLowerCase().includes('servi') ||
+          c.nome.toLowerCase().includes('epp')
+        )
       );
 
       todos.push(...fornecedoresPagina);
