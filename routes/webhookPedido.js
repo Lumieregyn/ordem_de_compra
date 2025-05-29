@@ -9,17 +9,17 @@ const axios = require('axios');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 
-// 🔧 Normalização para comparação de texto
+// 🔧 Normalização para texto
 function normalizarTexto(txt) {
   return txt
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // remove acentos
-    .replace(/[^a-zA-Z0-9]/g, '')    // remove símbolos e espaços
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
     .toLowerCase()
     .trim();
 }
 
-// 📦 Buscar todos os contatos (fornecedores)
+// 📦 Buscar todos os fornecedores
 async function listarTodosFornecedores() {
   const token = getAccessToken();
   if (!token) return [];
@@ -57,15 +57,16 @@ router.post('/', async (req, res) => {
       }
 
       const produto = await getProdutoFromTinyV3(produtoId);
-      const sku = produto.sku || '';
-      const marca = produto.marca?.nome?.trim() || 'Desconhecida';
+      const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
+      console.log('🔎 SKU detectado:', sku);
 
+      const marca = produto.marca?.nome?.trim() || 'Desconhecida';
       if (!marca) {
         resultados.push({ produtoSKU: sku, status: 'marca ausente' });
         continue;
       }
 
-      // 🔎 IA analisa o item e decide
+      // ⚙️ Análise da IA
       const respostaIA = await analisarPedidoViaIA(
         { produto, quantidade, valorUnitario, marca },
         fornecedores
@@ -83,6 +84,7 @@ router.post('/', async (req, res) => {
       );
 
       if (!fornecedorMatch) {
+        console.warn(`❌ Nenhum fornecedor compatível com marca: ${nomeFornecedorIA}`);
         resultados.push({
           produtoSKU: sku,
           status: 'fornecedor não encontrado',
@@ -90,6 +92,8 @@ router.post('/', async (req, res) => {
         });
         continue;
       }
+
+      console.log('✅ Fornecedor compatível encontrado:', fornecedorMatch.nome);
 
       if (itemIA.deveGerarOC) {
         console.log('📤 Enviando OC com dados:', {
