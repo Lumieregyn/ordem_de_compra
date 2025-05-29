@@ -2,13 +2,12 @@ const OpenAI = require('openai');
 const { listarProdutosTiny } = require('./tinyProductService');
 const { listarFornecedoresTiny } = require('./tinyFornecedorService');
 
-// Instância do OpenAI compatível com SDK 4.x+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
 /**
- * Analisa pedido da Tiny para inferir marca e fornecedor ideal com base no nome.
+ * Analisa um pedido e determina se deve gerar OC, baseado em marca/fornecedor.
  */
 async function analisarPedidoViaIA(pedido) {
   const produtos = await listarProdutosTiny();
