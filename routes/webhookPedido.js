@@ -24,9 +24,9 @@ async function listarTodosFornecedores() {
       });
 
       const contatosPagina = response.data.itens || [];
-      const total = response.data.paginacao?.total || 0;
+      if (!contatosPagina.length) break;
 
-      console.log('📄 Página', page, '- Contatos:', contatosPagina.length);
+      console.log(`📄 Página ${page} - Contatos: ${contatosPagina.length}`);
       console.log('🧾 Contatos recebidos (bruto):', contatosPagina.map(c => ({
         nome: c.nome,
         tipoPessoa: c.tipoPessoa
@@ -47,12 +47,14 @@ async function listarTodosFornecedores() {
       );
 
       todos.push(...fornecedoresPagina);
-
-      if (page * limit >= total) break;
       page++;
     }
 
-    return todos;
+    // Deduplicar por ID
+    const fornecedoresUnicos = Array.from(new Map(todos.map(f => [f.id, f])).values());
+    console.log('📦 Total de fornecedores únicos:', fornecedoresUnicos.length);
+    return fornecedoresUnicos;
+
   } catch (err) {
     console.error('❌ Erro ao buscar fornecedores (paginado):', err.message);
     return [];
@@ -90,12 +92,21 @@ router.post('/', async (req, res) => {
         continue;
       }
 
-      const respostaIA = await analisarPedidoViaIA({
-        produto,
-        quantidade,
-        valorUnitario,
-        marca
-      }, fornecedores);
+      console.log('🔍 Marca identificada:', marca);
+      console.log('🧠 Fornecedores entregues à IA:', fornecedores.map(f => f.nome));
+
+      let respostaIA;
+      try {
+        respostaIA = await analisarPedidoViaIA({
+          produto,
+          quantidade,
+          valorUnitario,
+          marca
+        }, fornecedores);
+      } catch (err) {
+        console.error('❌ Erro na inferência IA:', err.message);
+        return res.status(500).json({ erro: 'Erro na análise da IA' });
+      }
 
       const itemIA = respostaIA?.itens?.[0];
       if (!itemIA) {
