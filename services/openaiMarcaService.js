@@ -1,17 +1,14 @@
-const { Configuration, OpenAIApi } = require('openai');
+const OpenAI = require('openai');
 const { listarProdutosTiny } = require('./tinyProductService');
 const { listarFornecedoresTiny } = require('./tinyFornecedorService');
 
-const configuration = new Configuration({
+// Instância do OpenAI compatível com SDK 4.x+
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-const openai = new OpenAIApi(configuration);
-
 /**
- * Recebe um pedido da Tiny, extrai SKU, marca e determina fornecedor.
- * @param {*} pedido 
- * @returns resposta formatada para webhook
+ * Analisa pedido da Tiny para inferir marca e fornecedor ideal com base no nome.
  */
 async function analisarPedidoViaIA(pedido) {
   const produtos = await listarProdutosTiny();
@@ -38,7 +35,6 @@ async function analisarPedidoViaIA(pedido) {
     if (marca === 'Não informado') {
       motivo = 'Marca não encontrada no produto';
     } else {
-      // Comparação direta por nome (case insensitive, ignorando espaços)
       const fornecedorMatch = fornecedores.find(f =>
         normalizarTexto(f.nome) === normalizarTexto(marca)
       );
@@ -64,9 +60,6 @@ async function analisarPedidoViaIA(pedido) {
   return { itens: resultados };
 }
 
-/**
- * Normaliza textos removendo acentuação, espaços extras e caixa alta
- */
 function normalizarTexto(texto) {
   return texto
     ?.normalize('NFD')
