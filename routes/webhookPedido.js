@@ -8,7 +8,7 @@ const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const axios = require('axios');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
-const MAX_PAGINAS = 250;
+const MAX_PAGINAS = 100;
 
 async function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -17,7 +17,7 @@ async function delay(ms) {
 function normalizarTexto(txt) {
   return txt
     ?.normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9]/g, '')
     .toLowerCase()
     .trim();
@@ -33,35 +33,15 @@ async function listarTodosFornecedores() {
 
   try {
     while (page <= MAX_PAGINAS) {
-      let response;
-      let tentativas = 3;
-      while (tentativas > 0) {
-        try {
-          response = await axios.get(`${TINY_API_V3_BASE}/contatos?page=${page}&limit=${limit}`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          break;
-        } catch (err) {
-          if (err.response?.status === 429 && tentativas > 0) {
-            console.warn(`⏳ Rate limit Tiny - retry ${4 - tentativas}`);
-            await delay(1000 * (4 - tentativas));
-            tentativas--;
-          } else {
-            throw err;
-          }
-        }
-      }
+      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=J&nome=FORNECEDOR&page=${page}&limit=${limit}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
       const contatosPagina = response.data.itens || [];
       if (!contatosPagina.length) break;
 
       console.log(`📄 Página ${page} - Contatos: ${contatosPagina.length}`);
-
-      const fornecedoresPagina = contatosPagina.filter(c =>
-        c.tipoPessoa === 'J' && c.nome && c.nome.trim().length > 3
-      );
-      todos.push(...fornecedoresPagina);
-
+      todos.push(...contatosPagina);
       page++;
       await delay(300);
     }
