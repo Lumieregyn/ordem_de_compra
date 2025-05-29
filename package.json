@@ -10,7 +10,7 @@
     "axios": "^1.6.0",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
-    "openai": "^4.28.4",           // ✅ AQUI está o pacote que faltava
+    "openai": "^4.28.4",
     "p-limit": "^4.0.0"
   },
   "engines": {
