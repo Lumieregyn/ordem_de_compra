@@ -7,6 +7,7 @@ const { processarProdutosTiny } = require('./services/tinyService');
 const { inferirMarcaViaIA } = require('./services/openaiMarcaService');
 const { getProdutoFromTinyV3 } = require('./services/tinyProductService');
 const listarMarcasRoute = require('./routes/listarMarcas');
+const webhookPedidoRoute = require('./routes/webhookPedido'); // ✅ NOVO
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -76,9 +77,13 @@ app.get('/testar-marca-ia/:id', async (req, res) => {
   }
 });
 
-// 📦 Listar produtos do MongoDB
+// 📦 Listar marcas (via Tiny, não mais Mongo)
 app.use('/listar-marcas', listarMarcasRoute);
 
+// 🧠 NOVA ROTA: Análise completa de pedido com IA
+app.use('/webhook-pedido', webhookPedidoRoute); // ✅ AQUI
+
+// Start server
 app.listen(PORT, () => {
   console.log(`🌐 Servidor rodando na porta ${PORT}`);
 });
