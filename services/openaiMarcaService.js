@@ -1,101 +1,80 @@
-const { OpenAI } = require('openai');
-const { listarTodosFornecedores } = require('./tinyFornecedorService');
+const { Configuration, OpenAIApi } = require('openai');
+const { listarProdutosTiny } = require('./tinyProductService');
+const { listarFornecedoresTiny } = require('./tinyFornecedorService');
 
-const openai = new OpenAI({
+const configuration = new Configuration({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+const openai = new OpenAIApi(configuration);
+
 /**
- * Analisa um pedido e decide, com apoio da IA, se deve gerar uma OC.
- * A IA considera a marca do produto e os fornecedores disponíveis.
+ * Recebe um pedido da Tiny, extrai SKU, marca e determina fornecedor.
+ * @param {*} pedido 
+ * @returns resposta formatada para webhook
  */
 async function analisarPedidoViaIA(pedido) {
-  try {
-    const fornecedores = await listarTodosFornecedores();
+  const produtos = await listarProdutosTiny();
+  const fornecedores = await listarFornecedoresTiny();
 
-    if (fornecedores.length === 0) {
-      console.warn('⚠️ Nenhum fornecedor disponível na Tiny');
-    }
+  if (fornecedores.length === 0) {
+    console.warn('⚠️ Nenhum fornecedor disponível na Tiny');
+  }
 
-    const nomesFornecedores = fornecedores.map(f => f.nome).filter(Boolean);
+  const resultados = [];
 
-    const prompt = `
-Você é um sistema de análise de pedidos que decide se deve gerar uma Ordem de Compra (OC).
+  for (const item of pedido.itens || []) {
+    const produtoId = item.produto?.id;
+    const produtoEncontrado = produtos.find(p => p.id === produtoId);
+    const sku = produtoEncontrado?.sku || 'DESCONHECIDO';
+    const marca = produtoEncontrado?.marca?.trim()?.toUpperCase() || 'Não informado';
 
-📦 Pedido:
-${JSON.stringify(pedido, null, 2)}
+    console.log(`🔎 SKU detectado: ${sku}`);
 
-📋 Lista de fornecedores disponíveis:
-${nomesFornecedores.map((f, i) => `- ${f}`).join('\n')}
+    let fornecedorSelecionado = '';
+    let deveGerarOC = false;
+    let motivo = '';
 
-📌 Regras:
-- A marca do produto deve ser usada para identificar o fornecedor.
-- Se o nome da marca for encontrado na lista de fornecedores, gere uma OC.
-- Responda com o nome exato do fornecedor correspondente.
-- Caso não encontre, retorne "deveGerarOC": false com explicação.
-
-🧠 Responda apenas neste JSON:
-
-{
-  "itens": [
-    {
-      "produtoSKU": "<sku>",
-      "marca": "<marca>",
-      "fornecedor": "<nome do fornecedor ou vazio>",
-      "deveGerarOC": true | false,
-      "motivo": "<explicação>"
-    }
-  ]
-}
-`;
-
-    const resposta = await openai.chat.completions.create({
-      model: 'gpt-4',
-      temperature: 0.3,
-      messages: [
-        {
-          role: 'system',
-          content: 'Você é um analisador de pedidos que decide se deve gerar OC com base na marca e fornecedor.'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ]
-    });
-
-    const texto = resposta.choices[0]?.message?.content?.trim();
-    console.log('🧠 RESPOSTA DA IA:\n', texto);
-
-    const resultado = JSON.parse(texto);
-
-    // 🧠 Localiza ID do fornecedor real com base no nome retornado pela IA
-    for (const item of resultado.itens) {
-      const nomeIA = item.fornecedor?.toLowerCase().trim();
-      const fornecedor = fornecedores.find(f =>
-        f.nome?.toLowerCase().trim() === nomeIA
+    if (marca === 'Não informado') {
+      motivo = 'Marca não encontrada no produto';
+    } else {
+      // Comparação direta por nome (case insensitive, ignorando espaços)
+      const fornecedorMatch = fornecedores.find(f =>
+        normalizarTexto(f.nome) === normalizarTexto(marca)
       );
 
-      item.fornecedorId = fornecedor?.id || null;
+      if (fornecedorMatch) {
+        fornecedorSelecionado = fornecedorMatch.nome;
+        deveGerarOC = true;
+        motivo = 'O nome do fornecedor é exatamente igual ao da marca do produto';
+      } else {
+        motivo = 'Fornecedor da marca não encontrado na lista disponível';
+      }
     }
 
-    return resultado;
-
-  } catch (err) {
-    console.error('❌ Erro ao processar pedido via IA:', err.message);
-    return {
-      itens: [
-        {
-          produtoSKU: '',
-          marca: '',
-          fornecedor: '',
-          fornecedorId: null,
-          deveGerarOC: false,
-          motivo: 'Erro ao interpretar resposta da IA'
-        }
-      ]
-    };
+    resultados.push({
+      produtoSKU: sku,
+      marca,
+      fornecedor: fornecedorSelecionado,
+      deveGerarOC,
+      motivo
+    });
   }
+
+  return { itens: resultados };
 }
 
-module.exports = { analisarPedidoViaIA };
+/**
+ * Normaliza textos removendo acentuação, espaços extras e caixa alta
+ */
+function normalizarTexto(texto) {
+  return texto
+    ?.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '')
+    .toUpperCase();
+}
+
+module.exports = {
+  analisarPedidoViaIA
+};
