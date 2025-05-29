@@ -19,7 +19,7 @@ async function listarTodosFornecedores() {
 
   try {
     while (true) {
-      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?page=${page}&limit=${limit}`, {
+      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=fornecedor&page=${page}&limit=${limit}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
