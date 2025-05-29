@@ -3,10 +3,14 @@ const { getAccessToken } = require('./tokenService');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 
+/**
+ * Lista todos os contatos da Tiny classificados como fornecedores.
+ * Retorna: [{ id, nome }]
+ */
 async function listarTodosFornecedores() {
   const token = getAccessToken();
   if (!token) {
-    console.warn('⚠️ Token não encontrado. Rode /auth → /callback primeiro.');
+    console.warn('⚠️ Token de acesso ausente. Faça a autenticação via /auth e /callback.');
     return [];
   }
 
@@ -19,23 +23,34 @@ async function listarTodosFornecedores() {
       const response = await axios.get(`${TINY_API_V3_BASE}/contatos`, {
         headers: { Authorization: `Bearer ${token}` },
         params: {
-          // tipo: 'fornecedor', ← ⚠️ REMOVIDO
           page,
           size: pageSize
         }
       });
 
-      const pageData = response.data?._embedded?.contatos || [];
-      fornecedores.push(...pageData);
+      const contatos = response.data?._embedded?.contatos || [];
+
+      // 🔍 Filtrar apenas os fornecedores
+      const fornecedoresPagina = contatos.filter(contato => {
+        const tipo = contato?.tipo?.toLowerCase?.() || '';
+        const tags = contato?.tags?.map(t => t.toLowerCase()) || [];
+
+        return tipo.includes('fornecedor') || tags.includes('fornecedor');
+      });
+
+      fornecedores.push(...fornecedoresPagina);
 
       const totalPages = response.data?.page?.totalPages || 1;
       if (page >= totalPages) break;
       page++;
     }
 
-    console.log(`📦 ${fornecedores.length} contatos carregados da Tiny`);
+    console.log(`📦 ${fornecedores.length} fornecedores identificados`);
+    return fornecedores.map(f => ({
+      id: f.id || f.codigo, // fallback para campo 'codigo' se 'id' não vier
+      nome: f.nome?.trim()
+    }));
 
-    return fornecedores;
   } catch (err) {
     console.error('❌ Erro ao buscar fornecedores:', err.response?.data || err.message);
     return [];
