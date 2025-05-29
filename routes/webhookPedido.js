@@ -92,12 +92,21 @@ router.post('/', async (req, res) => {
       }
 
       if (itemIA.deveGerarOC) {
+        console.log('📤 Enviando OC com dados:', {
+          produtoId,
+          quantidade,
+          valorUnitario,
+          idFornecedor: fornecedorMatch.id
+        });
+
         const respostaOC = await enviarOrdemCompra({
           produtoId,
           quantidade,
           valorUnitario,
           idFornecedor: fornecedorMatch.id
         });
+
+        console.log('📥 Resposta da Tiny:', respostaOC);
 
         resultados.push({
           produtoSKU: sku,
