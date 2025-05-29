@@ -13,14 +13,27 @@ async function listarTodosFornecedores() {
   const token = getAccessToken();
   if (!token) return [];
 
-  try {
-    const response = await axios.get(`${TINY_API_V3_BASE}/contatos`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+  const todos = [];
+  let page = 1;
+  const limit = 50;
 
-    return response.data._embedded?.contatos || [];
+  try {
+    while (true) {
+      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?page=${page}&limit=${limit}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      const contatosPagina = response.data._embedded?.contatos || [];
+      todos.push(...contatosPagina);
+
+      const temProxima = response.data.page?.totalPages > page;
+      if (!temProxima) break;
+      page++;
+    }
+
+    return todos;
   } catch (err) {
-    console.error('❌ Erro ao buscar fornecedores:', err.message);
+    console.error('❌ Erro ao buscar fornecedores (paginado):', err.message);
     return [];
   }
 }
