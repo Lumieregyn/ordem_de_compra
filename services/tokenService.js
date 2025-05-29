@@ -1,36 +1,35 @@
 const axios = require('axios');
-const qs = require('qs');
-
 let accessToken = null;
 
 async function authCallback(code) {
   if (!code) throw new Error('Código de autorização ausente');
 
-  const payload = qs.stringify({
-    grant_type: 'authorization_code',
-    code,
-    client_id: process.env.CLIENT_ID,
-    client_secret: process.env.CLIENT_SECRET,
-    redirect_uri: process.env.REDIRECT_URI
-  });
+  const params = new URLSearchParams();
+  params.append('grant_type', 'authorization_code');
+  params.append('code', code);
+  params.append('client_id', process.env.CLIENT_ID);
+  params.append('client_secret', process.env.CLIENT_SECRET);
+  params.append('redirect_uri', process.env.REDIRECT_URI);
 
-  const config = {
-    method: 'post',
-    url: 'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    data: payload
-  };
+  try {
+    const response = await axios.post(
+      'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
+      params,
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        }
+      }
+    );
 
-  const response = await axios(config);
-  accessToken = response.data.access_token;
-
-  // Se quiser persistir esse token em Mongo futuramente, aqui seria o lugar
-  console.log(`✅ Token obtido com sucesso. Expira em ${response.data.expires_in} segundos.`);
+    accessToken = response.data.access_token;
+    console.log('✅ Token obtido com sucesso. Expira em', response.data.expires_in, 'segundos.');
+  } catch (err) {
+    console.error('❌ Erro no callback:', err.response?.data || err.message);
+    throw err;
+  }
 }
 
-/**
- * Retorna o token salvo em memória
- */
 function getAccessToken() {
   return accessToken;
 }
