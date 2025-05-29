@@ -19,12 +19,18 @@ async function listarTodosFornecedores() {
 
   try {
     while (true) {
-      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=fornecedor&page=${page}&limit=${limit}`, {
+      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?page=${page}&limit=${limit}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
       const contatosPagina = response.data._embedded?.contatos || [];
-      todos.push(...contatosPagina);
+
+      // ✅ Filtra localmente apenas fornecedores
+      const fornecedoresPagina = contatosPagina.filter(c => 
+        c.tipoPessoa?.nome?.toLowerCase() === 'fornecedor'
+      );
+
+      todos.push(...fornecedoresPagina);
 
       const temProxima = response.data.page?.totalPages > page;
       if (!temProxima) break;
