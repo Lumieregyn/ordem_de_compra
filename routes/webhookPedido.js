@@ -42,15 +42,12 @@ async function listarTodosFornecedores() {
 
       console.log(`📄 Página ${page} - Contatos: ${contatosPagina.length}`);
 
-      // ✅ Apenas pessoas jurídicas, ativos e fornecedores
+      // Apenas PJ com nomes válidos
       const fornecedoresPagina = contatosPagina.filter(c =>
-        c.tipoPessoa === 'J' &&
-        c.nome && c.nome.trim().length > 3 &&
-        c.situacao === 'A' &&
-        (c.tiposContato || []).some(tipo => tipo.nome.toLowerCase().includes('fornecedor'))
+        c.tipoPessoa === 'J' && c.nome && c.nome.trim().length > 3
       );
-
       todos.push(...fornecedoresPagina);
+
       page++;
       await delay(300);
     }
@@ -109,9 +106,11 @@ router.post('/', async (req, res) => {
       }
 
       const marcaNormalizada = normalizarTexto(marca);
+      const nomePadrao = `FORNECEDOR ${marcaNormalizada}`;
 
+      // 🔍 Match direto pelo padrão renomeado
       const fornecedorMatchDireto = fornecedores.find(f =>
-        normalizarTexto(f.nome).includes(marcaNormalizada)
+        normalizarTexto(f.nome).includes(normalizarTexto(nomePadrao))
       );
 
       if (fornecedorMatchDireto) {
@@ -165,6 +164,7 @@ router.post('/', async (req, res) => {
 
       if (itemIA.deveGerarOC) {
         console.log('📤 Enviando OC com dados:', { produtoId, quantidade, valorUnitario, idFornecedor: itemIA.idFornecedor });
+
         const respostaOC = await enviarOrdemCompra({ produtoId, quantidade, valorUnitario, idFornecedor: itemIA.idFornecedor });
         console.log('📥 Resposta da Tiny:', respostaOC);
 
