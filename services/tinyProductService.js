@@ -3,6 +3,7 @@ const { getAccessToken } = require('./tokenService');
 
 /**
  * Lista todos os produtos da Tiny usando a API v3.
+ * Retorna: [{ id, sku, marca }]
  */
 async function listarProdutosTiny() {
   const token = getAccessToken();
@@ -37,6 +38,9 @@ async function listarProdutosTiny() {
       }
 
       pagina++;
+
+      // Delay para evitar erro 429
+      await new Promise(res => setTimeout(res, 1000));
     }
 
     console.log(`📦 ${produtos.length} produtos carregados da Tiny`);
@@ -48,8 +52,7 @@ async function listarProdutosTiny() {
 }
 
 /**
- * Busca um produto individual da Tiny v3 via ID.
- * Usado para testar marca via rota /testar-marca-ia/:id
+ * Consulta um único produto pelo ID na API v3 da Tiny
  */
 async function getProdutoFromTinyV3(produtoId) {
   const token = getAccessToken();
