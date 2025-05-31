@@ -3,6 +3,7 @@ const { getAccessToken } = require('./tokenService');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 const MAX_PAGINAS = 30;
+const MAX_TENTATIVAS = 5;
 
 /**
  * Busca o ID do pedido Tiny com base no número visível (ex: 13036).
@@ -31,20 +32,26 @@ async function buscarIdPedidoPorNumero(numeroPedido) {
     if (lista.length === 0) break;
   }
 
-  throw new Error(`Pedido número ${numeroPedido} não encontrado na listagem da API.`);
+  return null; // ← não lança erro aqui (para o retry funcionar)
 }
 
 /**
  * Busca os dados completos de um pedido usando o número visível do Tiny.
  * Internamente localiza o ID correto e usa o endpoint /pedidos/{id}
+ * Com retry progressivo automático (até 5 vezes, com delay crescente)
  */
 async function getPedidoCompletoByNumero(numeroPedido) {
   const token = getAccessToken();
   if (!token) throw new Error('Token de acesso à API Tiny não disponível');
 
-  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+  for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
     try {
       const idPedido = await buscarIdPedidoPorNumero(numeroPedido);
+
+      if (!idPedido) {
+        throw new Error(`Pedido número ${numeroPedido} ainda não encontrado na listagem da API.`);
+      }
+
       const url = `${TINY_API_V3_BASE}/pedidos/${idPedido}`;
       const response = await axios.get(url, {
         headers: { Authorization: `Bearer ${token}` }
@@ -57,9 +64,10 @@ async function getPedidoCompletoByNumero(numeroPedido) {
       return pedido;
 
     } catch (err) {
-      if (tentativa < 3) {
-        console.warn(`⏳ Tentativa ${tentativa} falhou para pedido ${numeroPedido}. Tentando novamente em 5s...`);
-        await new Promise(resolve => setTimeout(resolve, 5000));
+      if (tentativa < MAX_TENTATIVAS) {
+        const espera = tentativa * 7000; // 7s, 14s, 21s, 28s...
+        console.warn(`⏳ Tentativa ${tentativa} falhou para pedido ${numeroPedido}. Tentando novamente em ${espera / 1000}s...`);
+        await new Promise(resolve => setTimeout(resolve, espera));
       } else {
         console.error(`❌ Falha final ao buscar pedido ${numeroPedido}: ${err.message}`);
         throw err;
