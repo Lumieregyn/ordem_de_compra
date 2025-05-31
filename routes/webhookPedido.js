@@ -57,10 +57,14 @@ async function listarTodosFornecedores() {
 }
 
 router.post('/', async (req, res) => {
+  // ✅ Respondemos imediatamente à Tiny para evitar falha de webhook
+  res.status(200).send('Webhook recebido ✅');
+
   try {
     const pedido = req.body;
     if (!pedido || !pedido.itens || !pedido.itens.length) {
-      return res.status(400).json({ erro: 'Pedido inválido ou sem itens.' });
+      console.warn('⚠️ Pedido inválido ou sem itens:', pedido);
+      return;
     }
 
     const fornecedores = await listarTodosFornecedores();
@@ -137,7 +141,7 @@ router.post('/', async (req, res) => {
         respostaIA = await analisarPedidoViaIA({ produto, quantidade, valorUnitario, marca }, fornecedoresFiltrados);
       } catch (err) {
         console.error('❌ Erro na inferência IA:', err.message);
-        return res.status(500).json({ erro: 'Erro na análise da IA' });
+        return;
       }
 
       const itemIA = respostaIA?.itens?.[0];
@@ -177,11 +181,8 @@ router.post('/', async (req, res) => {
       }
     }
 
-    res.json({ status: 'ok', resultados });
-
   } catch (err) {
     console.error('❌ Erro geral no webhook:', err.message || err);
-    res.status(500).json({ erro: 'Erro ao processar pedido' });
   }
 });
 
