@@ -61,12 +61,12 @@ router.post('/', async (req, res) => {
   res.status(200).send('Webhook recebido ✅');
 
   try {
-    // 🔍 Detecta se o pedido está em body.dados.pedido ou body.pedido
     const body = req.body;
     const pedido = body?.dados?.pedido || body?.pedido;
 
-    if (!pedido || !pedido.itens || !pedido.itens.length) {
-      console.warn('⚠️ Pedido inválido ou sem itens:', body);
+    if (!pedido || !pedido.itens || !Array.isArray(pedido.itens) || pedido.itens.length === 0) {
+      console.warn('📭 Webhook recebido sem dados suficientes de pedido (provavelmente sem itens):');
+      console.warn(JSON.stringify(body, null, 2));
       return;
     }
 
