@@ -5,6 +5,7 @@ const { getProdutoFromTinyV3 } = require('../services/tinyProductService');
 const { getAccessToken } = require('../services/tokenService');
 const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
+const { getPedidoCompletoByNumero } = require('../services/tinyPedidoService');
 const axios = require('axios');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
@@ -57,16 +58,22 @@ async function listarTodosFornecedores() {
 }
 
 router.post('/', async (req, res) => {
-  // ✅ Respondemos imediatamente à Tiny para evitar falha de webhook
   res.status(200).send('Webhook recebido ✅');
 
   try {
     const body = req.body;
-    const pedido = body?.dados?.pedido || body?.pedido;
+    const numeroPedido = body?.dados?.numero;
+
+    if (!numeroPedido) {
+      console.warn('❌ Webhook sem número de pedido válido:', JSON.stringify(body, null, 2));
+      return;
+    }
+
+    console.log(`📦 Webhook gatilho para pedido ${numeroPedido}. Buscando dados completos via API V3...`);
+    const pedido = await getPedidoCompletoByNumero(numeroPedido);
 
     if (!pedido || !pedido.itens || !Array.isArray(pedido.itens) || pedido.itens.length === 0) {
-      console.warn('📭 Webhook recebido sem dados suficientes de pedido (provavelmente sem itens):');
-      console.warn(JSON.stringify(body, null, 2));
+      console.warn(`❌ Pedido ${numeroPedido} encontrado, mas sem itens válidos.`);
       return;
     }
 
