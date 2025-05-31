@@ -2,71 +2,55 @@ const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
-const MAX_PAGINAS = 30;
 
 /**
- * Busca o ID do pedido Tiny com base no número visível
+ * Obtém os dados completos de um pedido Tiny pelo ID oficial (ex: 734153635).
+ * Esse ID é obtido diretamente do webhook no campo `dados.id`.
+ *
+ * @param {string|number} idPedido - ID interno do pedido (não é o número visível no painel)
+ * @returns {Promise<Object>} - Objeto completo do pedido
  */
-async function buscarIdPedidoPorNumero(numeroPedido) {
+async function getPedidoCompletoById(idPedido) {
   const token = getAccessToken();
-  if (!token) throw new Error('Token de acesso à API Tiny não disponível');
 
-  for (let page = 1; page <= MAX_PAGINAS; page++) {
-    const url = `${TINY_API_V3_BASE}/pedidos?page=${page}&limit=50`;
+  if (!token) {
+    console.error('❌ Token de acesso não encontrado. Verifique o fluxo OAuth.');
+    throw new Error('Token de acesso ausente.');
+  }
+
+  const url = `${TINY_API_V3_BASE}/pedidos/${idPedido}`;
+
+  try {
+    console.log(`📡 Buscando pedido completo via API V3 (ID: ${idPedido})...`);
     const response = await axios.get(url, {
-      headers: { Authorization: `Bearer ${token}` }
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
     });
 
-    const lista = response.data?.pedidos || [];
+    const pedido = response.data?.pedido;
 
-    // 🔍 Log dos números da página atual
-    const numerosNaPagina = lista.map(p => p.numero).join(', ');
-    console.log(`📄 Página ${page} – Números encontrados: [${numerosNaPagina}]`);
-
-    const encontrado = lista.find(p => `${p.numero}` === `${numeroPedido}`);
-    if (encontrado) {
-      return encontrado.id;
+    if (!pedido) {
+      console.warn(`⚠️ Pedido ID ${idPedido} retornou vazio na API.`);
+      throw new Error(`Pedido ID ${idPedido} não encontrado ou inválido.`);
     }
 
-    if (lista.length === 0) break;
-  }
+    // Log básico de conferência
+    console.log(`✅ Pedido carregado com sucesso: número ${pedido.numero}, itens: ${pedido.itens?.length || 0}`);
+    return pedido;
 
-  throw new Error(`Pedido número ${numeroPedido} não encontrado na listagem.`);
+  } catch (error) {
+    const status = error?.response?.status;
+    const mensagem = error?.response?.data?.mensagem || error.message;
+
+    console.error(`❌ Erro ao buscar pedido ${idPedido} | Status: ${status} | Mensagem: ${mensagem}`);
+    throw new Error(`Erro ao buscar pedido ${idPedido}: ${mensagem}`);
+  }
 }
 
 /**
- * Busca os dados completos de um pedido Tiny pelo número oficial.
- * Faz retry automático até 3 vezes com delay se necessário.
+ * Alias compatível para uso futuro (manter padrão de nomeação)
  */
-async function getPedidoCompletoByNumero(numeroPedido) {
-  const token = getAccessToken();
-  if (!token) throw new Error('Token de acesso à API Tiny não disponível');
-
-  for (let tentativa = 1; tentativa <= 3; tentativa++) {
-    try {
-      const idPedido = await buscarIdPedidoPorNumero(numeroPedido);
-      const url = `${TINY_API_V3_BASE}/pedidos/${idPedido}`;
-      const response = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      const pedido = response.data?.pedido;
-      if (!pedido) throw new Error(`Pedido ID ${idPedido} não encontrado.`);
-
-      return pedido;
-
-    } catch (err) {
-      if (tentativa < 3) {
-        console.warn(`⏳ Tentativa ${tentativa} falhou. Repetindo em 5s... (${err.message})`);
-        await new Promise(resolve => setTimeout(resolve, 5000));
-      } else {
-        console.error(`❌ Falha ao buscar pedido ${numeroPedido}:`, err.message);
-        throw err;
-      }
-    }
-  }
-}
-
 module.exports = {
-  getPedidoCompletoByNumero
+  getPedidoCompletoById
 };
