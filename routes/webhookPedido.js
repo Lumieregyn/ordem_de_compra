@@ -61,9 +61,12 @@ router.post('/', async (req, res) => {
   res.status(200).send('Webhook recebido ✅');
 
   try {
-    const pedido = req.body;
+    // 🔍 Detecta se o pedido está em body.dados.pedido ou body.pedido
+    const body = req.body;
+    const pedido = body?.dados?.pedido || body?.pedido;
+
     if (!pedido || !pedido.itens || !pedido.itens.length) {
-      console.warn('⚠️ Pedido inválido ou sem itens:', pedido);
+      console.warn('⚠️ Pedido inválido ou sem itens:', body);
       return;
     }
 
