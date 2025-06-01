@@ -79,18 +79,15 @@ router.post('/', async (req, res) => {
 
     if (!pedido || !pedido.id || !pedido.numeroPedido) {
       console.warn(`⚠️ Dados incompletos do pedido retornado. ID: ${idPedido}`);
-      await enviarNotificacaoWhatsapp(`⚠️ Pedido ${numeroPedido} – dados incompletos retornados. OC não gerada.`);
       return;
     }
 
     if (!pedido.itens || !Array.isArray(pedido.itens) || pedido.itens.length === 0) {
       console.warn(`⚠️ Pedido ${numeroPedido} retornado sem itens. Ignorando.`);
-      await enviarNotificacaoWhatsapp(`⚠️ Pedido ${numeroPedido} retornado sem itens. OC não gerada.`);
       return;
     }
 
     console.log(`📄 Pedido completo recebido:\n`, JSON.stringify(pedido, null, 2));
-    console.log(`📦 Itens do pedido:\n`, JSON.stringify(pedido.itens, null, 2));
 
     const fornecedores = await listarTodosFornecedores();
     const resultados = [];
@@ -129,13 +126,13 @@ router.post('/', async (req, res) => {
         if (respostaIA?.deveGerarOC && typeof respostaIA?.idFornecedor === 'number') {
           fornecedorSelecionado = fornecedores.find(f => f.id === respostaIA.idFornecedor);
         } else {
-          await enviarNotificacaoWhatsapp(`⚠️ Pedido ${numeroPedido} – IA não encontrou fornecedor para SKU ${sku}`);
+          console.warn(`⚠️ Pedido ${numeroPedido} – IA não encontrou fornecedor para SKU ${sku}`);
           continue;
         }
       }
 
       if (!fornecedorSelecionado?.id) {
-        await enviarNotificacaoWhatsapp(`⚠️ Pedido ${numeroPedido} – Fornecedor inválido para SKU ${sku}`);
+        console.warn(`⚠️ Pedido ${numeroPedido} – Fornecedor inválido para SKU ${sku}`);
         continue;
       }
 
@@ -154,7 +151,6 @@ router.post('/', async (req, res) => {
       const faltando = obrigatorios.filter(c => !dadosParaOC[c]);
       if (faltando.length) {
         console.error(`❌ Campos obrigatórios faltando para SKU ${sku}:`, faltando);
-        await enviarNotificacaoWhatsapp(`❌ Pedido ${numeroPedido} – Campos ausentes: ${faltando.join(', ')}`);
         continue;
       }
 
@@ -185,6 +181,8 @@ router.post('/', async (req, res) => {
       const resposta = await enviarOrdemCompra(payloadOC);
       resultados.push({ sku, fornecedor: fornecedorSelecionado.nome, status: resposta });
     }
+
+    console.log(`📦 Resultado final do processamento:\n`, resultados);
   } catch (err) {
     console.error('❌ Erro geral no webhook:', err.message || err);
   }
