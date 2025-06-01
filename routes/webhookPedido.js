@@ -5,7 +5,7 @@ const { getProdutoFromTinyV3 } = require('../services/tinyProductService');
 const { getAccessToken } = require('../services/tokenService');
 const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
-const { getPedidoCompletoById } = require('../services/tinyPedidoService');
+const { getPedidoCompletoById } = require('../services/tinyPedidoService'); // ✅ Importação correta
 const axios = require('axios');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
