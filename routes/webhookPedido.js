@@ -4,8 +4,8 @@ const router = express.Router();
 const { getProdutoFromTinyV3 } = require('../services/tinyProductService');
 const { getAccessToken } = require('../services/tokenService');
 const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
-const { enviarOrdemCompraV3 } = require('../services/enviarOrdemCompraV3'); // Bloco 5 real
-const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC'); // ✅ Bloco 4
+const { enviarOrdemCompra } = require('../services/enviarOrdem'); // ✅ Correto agora
+const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
 const { getPedidoCompletoById } = require('../services/tinyPedidoService');
 const axios = require('axios');
 
@@ -81,11 +81,10 @@ router.post('/', async (req, res) => {
       const marcaNormalizada = normalizarTexto(marca);
       const nomePadrao = `FORNECEDOR ${marcaNormalizada}`;
 
-      const fornecedorMatchDireto = fornecedores.find(f =>
+      let fornecedorSelecionado = fornecedores.find(f =>
         normalizarTexto(f.nome).includes(normalizarTexto(nomePadrao))
       );
 
-      let fornecedorSelecionado = fornecedorMatchDireto;
       if (!fornecedorSelecionado) {
         const fornecedoresFiltrados = fornecedores.filter(f =>
           normalizarTexto(f.nome).includes(marcaNormalizada) ||
@@ -112,7 +111,7 @@ router.post('/', async (req, res) => {
           origem: pedido.origem || 'comercial',
           dataPedido: pedido.data || new Date().toISOString().split('T')[0],
           dataPrevista: pedido.dataPrevista,
-          estimativaEntrega: 7, // ou extrair das observações se desejar
+          estimativaEntrega: 7,
           condicaoPagamento: pedido.condicao || "A prazo 30 dias",
           parcelas: pedido.parcelas || [],
           vendedor: { nome: pedido?.vendedor?.nome || 'Desconhecido' },
@@ -130,7 +129,7 @@ router.post('/', async (req, res) => {
           }
         });
 
-        const resposta = await enviarOrdemCompraV3(payloadOC);
+        const resposta = await enviarOrdemCompra(payloadOC);
         resultados.push({ sku, fornecedor: fornecedorSelecionado.nome, status: resposta });
       }
     }
