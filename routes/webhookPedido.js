@@ -87,8 +87,7 @@ router.post('/', async (req, res) => {
       return;
     }
 
-    console.log(`📄 Pedido completo recebido:
-`, JSON.stringify(pedido, null, 2));
+    console.log(`📄 Pedido completo recebido:\n`, JSON.stringify(pedido, null, 2));
 
     const fornecedores = await listarTodosFornecedores();
     const resultados = [];
@@ -132,26 +131,31 @@ router.post('/', async (req, res) => {
         }
       }
 
-      if (!fornecedorSelecionado?.id) {
-        console.warn(`⚠️ Pedido ${numeroPedido} – Fornecedor inválido para SKU ${sku}`);
-        continue;
-      }
-
       const dadosParaOC = {
         produtoId: produto.id,
         quantidade: item.quantidade || 1,
         valorUnitario: item.valorUnitario || item.valor_unitario || 0,
         sku,
-        idFornecedor: fornecedorSelecionado.id,
-        nomeFornecedor: fornecedorSelecionado.nome,
+        idFornecedor: fornecedorSelecionado?.id,
+        nomeFornecedor: fornecedorSelecionado?.nome,
         pedido,
         produto
       };
 
-      const obrigatorios = ['produtoId', 'quantidade', 'valorUnitario', 'sku', 'idFornecedor', 'pedido', 'produto'];
+      const obrigatorios = [
+        'produtoId',
+        'quantidade',
+        'valorUnitario',
+        'sku',
+        'idFornecedor',
+        'nomeFornecedor',
+        'pedido',
+        'produto'
+      ];
+
       const faltando = obrigatorios.filter(c => !dadosParaOC[c]);
       if (faltando.length) {
-        console.warn(`⚠️ Dados incompletos para SKU ${sku}. Campos faltando:`, faltando);
+        console.warn(`⚠️ Campos ausentes para SKU ${sku}: ${faltando.join(', ')}`);
         continue;
       }
 
@@ -168,8 +172,7 @@ router.post('/', async (req, res) => {
       resultados.push({ sku, fornecedor: fornecedorSelecionado.nome, status: resposta });
     }
 
-    console.log(`📦 Resultado final do processamento:
-`, resultados);
+    console.log(`📦 Resultado final do processamento:\n`, resultados);
   } catch (err) {
     console.error('❌ Erro geral no webhook:', err.message || err);
   }
