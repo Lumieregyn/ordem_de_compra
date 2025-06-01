@@ -4,17 +4,16 @@ const router = express.Router();
 const { getProdutoFromTinyV3 } = require('../services/tinyProductService');
 const { getAccessToken } = require('../services/tokenService');
 const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
-const { enviarOrdemCompra } = require('../services/enviarOrdem'); // ✅ Correto agora
+const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
 const { getPedidoCompletoById } = require('../services/tinyPedidoService');
+const { enviarNotificacaoWhatsapp } = require('../services/whatsappService'); // ⚠️ certifique-se que está criado
 const axios = require('axios');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
-const MAX_PAGINAS = 100;
+const MAX_PAGINAS = 10;
 
-async function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function normalizarTexto(txt) {
   return txt?.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
@@ -39,7 +38,7 @@ async function listarTodosFornecedores() {
 
       todos.push(...contatosPagina);
       page++;
-      await delay(300);
+      await delay(500);
     }
 
     return Array.from(new Map(todos.map(f => [f.id, f])).values());
@@ -74,64 +73,94 @@ router.post('/', async (req, res) => {
       const produto = await getProdutoFromTinyV3(produtoId);
       if (!produto) continue;
 
-      const sku = produto.sku || 'DESCONHECIDO';
+      const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
       const marca = produto.marca?.nome?.trim();
       if (!marca) continue;
 
       const marcaNormalizada = normalizarTexto(marca);
       const nomePadrao = `FORNECEDOR ${marcaNormalizada}`;
-
       let fornecedorSelecionado = fornecedores.find(f =>
-        normalizarTexto(f.nome).includes(normalizarTexto(nomePadrao))
+        normalizarTexto(f.nome) === nomePadrao
       );
 
+      // Heurística se não encontrou match exato
       if (!fornecedorSelecionado) {
-        const fornecedoresFiltrados = fornecedores.filter(f =>
+        fornecedorSelecionado = fornecedores.find(f =>
           normalizarTexto(f.nome).includes(marcaNormalizada) ||
-          marcaNormalizada.includes(normalizarTexto(f.nome))
+          marcaNormalizada.includes(normalizarTexto(f.nome).replace('fornecedor', '').trim())
         );
+      }
 
+      // Fallback IA
+      if (!fornecedorSelecionado) {
         const respostaIA = await analisarPedidoViaIA({
-          produto,
-          quantidade: item.quantidade,
-          valorUnitario: item.valorUnitario,
-          marca
-        }, fornecedoresFiltrados);
+          produtoSKU: sku,
+          marca,
+          fornecedores
+        });
 
-        const itemIA = respostaIA?.itens?.[0];
-        if (itemIA?.deveGerarOC && itemIA?.idFornecedor) {
-          fornecedorSelecionado = fornecedores.find(f => f.id === itemIA.idFornecedor);
+        if (respostaIA?.deveGerarOC && typeof respostaIA?.idFornecedor === 'number') {
+          fornecedorSelecionado = fornecedores.find(f => f.id === respostaIA.idFornecedor);
         } else {
+          console.warn(`⚠️ IA não encontrou fornecedor para SKU ${sku} / Marca ${marca}`);
+          await enviarNotificacaoWhatsapp(`⚠️ Pedido ${numeroPedido} – Fornecedor não identificado para SKU ${sku}. OC não será gerada.`);
           continue;
         }
       }
 
-      if (fornecedorSelecionado) {
-        const payloadOC = gerarPayloadOrdemCompra({
-          origem: pedido.origem || 'comercial',
-          dataPedido: pedido.data || new Date().toISOString().split('T')[0],
-          dataPrevista: pedido.dataPrevista,
-          estimativaEntrega: 7,
-          condicaoPagamento: pedido.condicao || "A prazo 30 dias",
-          parcelas: pedido.parcelas || [],
-          vendedor: { nome: pedido?.vendedor?.nome || 'Desconhecido' },
-          pedidoNumero: numeroPedido,
-          contatoId: fornecedorSelecionado.id,
-          produto: {
-            id: produto.id,
-            sku: produto.sku,
-            quantidade: item.quantidade || 1,
-            valor: item.valorUnitario || 0
-          },
-          fornecedor: {
-            id: fornecedorSelecionado.id,
-            nome: fornecedorSelecionado.nome
-          }
-        });
-
-        const resposta = await enviarOrdemCompra(payloadOC);
-        resultados.push({ sku, fornecedor: fornecedorSelecionado.nome, status: resposta });
+      if (!fornecedorSelecionado?.id) {
+        console.warn(`⚠️ Fornecedor inválido detectado para SKU ${sku}`);
+        await enviarNotificacaoWhatsapp(`⚠️ Pedido ${numeroPedido} – Fornecedor inválido para SKU ${sku}.`);
+        continue;
       }
+
+      // Preparar dados para gerarPayloadOrdemCompra
+      const dadosParaOC = {
+        produtoId: produto.id,
+        quantidade: item.quantidade || 1,
+        valorUnitario: item.valorUnitario || item.valor_unitario || 0,
+        sku,
+        idFornecedor: fornecedorSelecionado.id,
+        nomeFornecedor: fornecedorSelecionado.nome,
+        pedido,
+        produto
+      };
+
+      // Validação final antes de gerar payload
+      const obrigatorios = ['produtoId', 'quantidade', 'valorUnitario', 'sku', 'idFornecedor', 'nomeFornecedor'];
+      const faltando = obrigatorios.filter(c => !dadosParaOC[c]);
+      if (faltando.length) {
+        console.error(`❌ Campos obrigatórios faltando para SKU ${sku}:`, faltando);
+        await enviarNotificacaoWhatsapp(`❌ Pedido ${numeroPedido} – Campos ausentes: ${faltando.join(', ')}. OC não enviada.`);
+        continue;
+      }
+
+      const payloadOC = gerarPayloadOrdemCompra({
+        origem: pedido.origem || 'comercial',
+        dataPedido: pedido.data || new Date().toISOString().split('T')[0],
+        dataPrevista: pedido.dataPrevista,
+        estimativaEntrega: 7,
+        condicaoPagamento: pedido.condicao || "A prazo 30 dias",
+        parcelas: pedido.parcelas || [],
+        vendedor: { nome: pedido?.vendedor?.nome || 'Desconhecido' },
+        pedidoNumero: numeroPedido,
+        contatoId: dadosParaOC.idFornecedor,
+        produto: {
+          id: dadosParaOC.produtoId,
+          sku: dadosParaOC.sku,
+          quantidade: dadosParaOC.quantidade,
+          valor: dadosParaOC.valorUnitario
+        },
+        fornecedor: {
+          id: dadosParaOC.idFornecedor,
+          nome: dadosParaOC.nomeFornecedor
+        },
+        pedido: dadosParaOC.pedido,
+        produtoObj: dadosParaOC.produto
+      });
+
+      const resposta = await enviarOrdemCompra(payloadOC);
+      resultados.push({ sku, fornecedor: fornecedorSelecionado.nome, status: resposta });
     }
   } catch (err) {
     console.error('❌ Erro geral no webhook:', err.message || err);
