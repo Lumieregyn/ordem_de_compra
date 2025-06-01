@@ -71,7 +71,7 @@ router.post('/', async (req, res) => {
     }
 
     console.log(`📦 Webhook gatilho para pedido ${numeroPedido} (ID ${idPedido}). Buscando dados via API V3...`);
-    const pedido = await getPedidoCompletoById(idPedido); // ✅ Agora com ID real
+    const pedido = await getPedidoCompletoById(idPedido);
 
     if (!pedido || !pedido.itens || !Array.isArray(pedido.itens) || pedido.itens.length === 0) {
       console.warn(`❌ Pedido ${numeroPedido} encontrado, mas sem itens válidos.`);
