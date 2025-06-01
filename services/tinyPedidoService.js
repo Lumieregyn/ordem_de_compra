@@ -6,8 +6,7 @@ const MAX_TENTATIVAS = 5;
 
 /**
  * Busca os dados completos de um pedido Tiny usando o ID (entregue pelo webhook).
- * Usa /pedidos/{id}?completo=true com autenticação OAuth2.
- * Tenta até 5 vezes com espera crescente. Loga resposta completa em caso de falha.
+ * Compatível com a resposta atual da API Tiny (dados no nível raiz).
  */
 async function getPedidoCompletoById(idPedido) {
   const token = getAccessToken();
@@ -20,25 +19,24 @@ async function getPedidoCompletoById(idPedido) {
       console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido} (tentativa ${tentativa})`);
 
       const response = await axios.get(url, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
+        headers: { Authorization: `Bearer ${token}` },
+        validateStatus: () => true // ✅ captura todos os status, mesmo erros
       });
 
-      const pedido = response.data?.pedido;
+      const pedido = response.data;
 
-      if (!pedido) {
-        console.warn(`⚠️ Pedido ID ${idPedido} retornou vazio. Log completo da resposta:`);
+      if (!pedido || !pedido.id || !pedido.numeroPedido || !pedido.itens) {
+        console.warn(`⚠️ Pedido ID ${idPedido} retornou incompleto. Log completo da resposta:`);
         console.dir(response.data, { depth: null });
-        throw new Error(`Pedido ID ${idPedido} retornou vazio ou inválido.`);
+        throw new Error(`Pedido ID ${idPedido} retornou incompleto ou inválido.`);
       }
 
-      console.log(`✅ Pedido ${pedido.numero} carregado com sucesso (ID: ${idPedido})`);
+      console.log(`✅ Pedido ${pedido.numeroPedido} carregado com sucesso (ID: ${idPedido})`);
       return pedido;
 
     } catch (error) {
       const status = error?.response?.status || 'desconhecido';
-      const msg = error?.response?.data?.mensagem || error.message;
+      const msg = error?.message || 'Erro inesperado';
 
       console.warn(`⏳ Erro ao buscar pedido ID ${idPedido} | Tentativa ${tentativa} | Status: ${status} | ${msg}`);
 
