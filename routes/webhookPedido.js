@@ -5,7 +5,7 @@ const { getProdutoFromTinyV3 } = require('../services/tinyProductService');
 const { getAccessToken } = require('../services/tokenService');
 const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
-const { getPedidoCompletoById } = require('../services/tinyPedidoService'); // ✅ Nova função importada
+const { getPedidoCompletoById } = require('../services/tinyPedidoService');
 const axios = require('axios');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
@@ -25,7 +25,7 @@ function normalizarTexto(txt) {
 }
 
 async function listarTodosFornecedores() {
-  const token = getAccessToken();
+  const token = await getAccessToken();
   if (!token) return [];
 
   const todos = [];
@@ -70,10 +70,27 @@ router.post('/', async (req, res) => {
     }
 
     console.log(`📦 Webhook gatilho para pedido ${numeroPedido} (ID ${idPedido}). Buscando dados via API V3...`);
-    const pedido = await getPedidoCompletoById(idPedido);
 
-    if (!pedido || !pedido.itens || !Array.isArray(pedido.itens) || pedido.itens.length === 0) {
-      console.warn(`❌ Pedido ${numeroPedido} encontrado, mas sem itens válidos.`);
+    let pedido = null;
+    const maxTentativas = 5;
+    const delays = [5000, 10000, 15000, 20000, 30000];
+
+    for (let i = 0; i < maxTentativas; i++) {
+      try {
+        console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido} (tentativa ${i + 1})`);
+        pedido = await getPedidoCompletoById(idPedido);
+        if (pedido?.itens && pedido.itens.length > 0) break;
+      } catch (err) {
+        console.warn(`⚠️ Tentativa ${i + 1} falhou:`, err.message);
+      }
+
+      if (i < delays.length) {
+        await delay(delays[i]);
+      }
+    }
+
+    if (!pedido || !pedido.itens || pedido.itens.length === 0) {
+      console.error(`❌ Pedido ${numeroPedido} ainda não disponível após ${maxTentativas} tentativas.`);
       return;
     }
 
