@@ -1,52 +1,45 @@
-// services/tinyFornecedorService.js
-
 const axios = require('axios');
-const { getAccessToken } = require('./tokenService');
-const { TINY_API_V3_BASE, delay, normalizarTexto } = require('./tinyUtils');
 
-/**
- * Lista todos os fornecedores válidos.
- * Critérios:
- * - Pessoa Jurídica
- * - Nome começa com "FORNECEDOR "
- */
-async function listarFornecedoresPadronizados() {
-  const token = getAccessToken();
-  if (!token) return [];
+const BASE_URL = 'https://api.tiny.com.br/api2/fornecedores.pesquisa.php';
+const API_TOKEN = process.env.TINY_API_TOKEN;
 
-  const todos = [];
-  let page = 1;
-  const limit = 50;
+// Utilitário para aguardar (evita 429)
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-  try {
-    while (true) {
-      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?page=${page}&limit=${limit}`, {
-        headers: { Authorization: `Bearer ${token}` }
+async function listarTodosFornecedores() {
+  const fornecedores = [];
+  const maxPaginas = 10; // limite de segurança
+  const delayEntreRequisicoes = 800; // em milissegundos
+
+  for (let pagina = 1; pagina <= maxPaginas; pagina++) {
+    try {
+      const url = `${BASE_URL}?token=${API_TOKEN}&formato=json&pagina=${pagina}&nome=FORNECEDOR`;
+      const response = await axios.get(url);
+      const lista = response.data?.retorno?.fornecedores || [];
+
+      if (lista.length === 0) break; // fim da lista
+
+      lista.forEach(item => {
+        if (item?.fornecedor) {
+          fornecedores.push(item.fornecedor);
+        }
       });
 
-      const contatosPagina = response.data.itens || [];
-      if (!contatosPagina.length) break;
+      // Verifica se é a última página
+      const ultimaPagina = response.data?.retorno?.pagina?.ultima === "true";
+      if (ultimaPagina) break;
 
-      console.log(`📄 Página ${page} - Contatos: ${contatosPagina.length}`);
-
-      const fornecedores = contatosPagina.filter(c =>
-        c.tipoPessoa === 'J' &&
-        c.nome &&
-        c.nome.toUpperCase().startsWith('FORNECEDOR ')
-      );
-
-      todos.push(...fornecedores);
-      page++;
-      await delay(250);
+      await delay(delayEntreRequisicoes);
+    } catch (error) {
+      console.error(`[listarTodosFornecedores] Erro na página ${pagina}:`, error.response?.data || error.message);
+      break;
     }
-
-    const unicos = Array.from(new Map(todos.map(f => [f.id, f])).values());
-    console.log('📋 Fornecedores disponíveis:', unicos.map(f => f.nome));
-    return unicos;
-  } catch (err) {
-    console.error('❌ Erro ao buscar fornecedores:', err.message);
-    return [];
   }
+
+  console.log(`[listarTodosFornecedores] Total retornado: ${fornecedores.length}`);
+  return fornecedores;
 }
 
-module.exports = { listarFornecedoresPadronizados };
+module.exports = {
+  listarTodosFornecedores
+};
