@@ -1,7 +1,6 @@
 const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
 const { validarRespostaOrdem } = require('./validarRespostaOrdemService');
-const { enviarNotificacaoWhatsapp } = require('./notificacaoWhatsappService');
 
 /**
  * Envia uma Ordem de Compra para a API Tiny v3.
@@ -68,35 +67,4 @@ async function enviarOrdemCompra(payload) {
 
     if (status === 200 && sucesso) {
       const { id, numero_pedido } = data.retorno.ordem_compra;
-      console.log(`[OC ✅] Ordem de Compra criada com sucesso: ID ${id}, Pedido ${numero_pedido}`);
-    } else {
-      const mensagemErro = `
-❌ Erro ao criar OC
-Status HTTP: ${status}
-Mensagem: ${data?.mensagem || 'Sem mensagem'}
-Detalhes: ${JSON.stringify(data?.detalhes || data?.retorno?.erros || 'Sem detalhes')}
-      `.trim();
-
-      console.warn('[OC ⚠️] Erro no envio da OC:', {
-        status,
-        mensagem: data?.mensagem,
-        detalhes: data?.detalhes || data?.retorno?.erros || [],
-      });
-
-      await enviarNotificacaoWhatsapp(mensagemErro);
-    }
-
-    return data;
-
-  } catch (err) {
-    console.error('[OC ❌] Erro inesperado ao enviar OC:', err.message);
-
-    await enviarNotificacaoWhatsapp(
-      `❌ Erro técnico ao enviar OC\nErro: ${err.message}\nAção: Verificar conexão com API Tiny`
-    );
-
-    return null;
-  }
-}
-
-module.exports = { enviarOrdemCompra };
+      console.log(`[OC ✅] Ordem de Compra criada com
