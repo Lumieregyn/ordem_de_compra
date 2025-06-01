@@ -148,10 +148,10 @@ router.post('/', async (req, res) => {
         produto
       };
 
-      const obrigatorios = ['produtoId', 'quantidade', 'valorUnitario', 'sku', 'idFornecedor', 'nomeFornecedor'];
+      const obrigatorios = ['produtoId', 'quantidade', 'valorUnitario', 'sku', 'idFornecedor', 'pedido', 'produto'];
       const faltando = obrigatorios.filter(c => !dadosParaOC[c]);
       if (faltando.length) {
-        console.error(`❌ Campos obrigatórios faltando para SKU ${sku}:`, faltando);
+        console.warn(`⚠️ Dados incompletos para SKU ${sku}. Campos faltando:`, faltando);
         continue;
       }
 
