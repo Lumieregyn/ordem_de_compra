@@ -5,8 +5,9 @@ const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 const MAX_TENTATIVAS = 5;
 
 /**
- * Busca os dados completos de um pedido Tiny usando o ID (via webhook).
- * Tenta automaticamente até 5 vezes com atraso progressivo.
+ * Busca os dados completos de um pedido Tiny usando o ID (entregue pelo webhook).
+ * Usa /pedidos/{id}?completo=true com autenticação OAuth2.
+ * Tenta até 5 vezes com espera crescente. Loga resposta completa em caso de falha.
  */
 async function getPedidoCompletoById(idPedido) {
   const token = getAccessToken();
@@ -19,13 +20,20 @@ async function getPedidoCompletoById(idPedido) {
       console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido} (tentativa ${tentativa})`);
 
       const response = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
       });
 
       const pedido = response.data?.pedido;
-      if (!pedido) throw new Error(`Pedido ID ${idPedido} retornou vazio ou inválido.`);
 
-      console.log(`✅ Pedido carregado com sucesso (ID: ${idPedido})`);
+      if (!pedido) {
+        console.warn(`⚠️ Pedido ID ${idPedido} retornou vazio. Log completo da resposta:`);
+        console.dir(response.data, { depth: null });
+        throw new Error(`Pedido ID ${idPedido} retornou vazio ou inválido.`);
+      }
+
+      console.log(`✅ Pedido ${pedido.numero} carregado com sucesso (ID: ${idPedido})`);
       return pedido;
 
     } catch (error) {
