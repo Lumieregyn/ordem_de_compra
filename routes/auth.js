@@ -1,71 +1,52 @@
 const express = require('express');
-const axios = require('axios');
-const qs = require('qs');
 const router = express.Router();
+const axios = require('axios');
 
-const { setAccessToken } = require('../services/tokenService');
-
-const OIDC_BASE = 'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect';
-const SCOPES = 'openid';
-
-router.get('/auth', (req, res) => {
+// GET /auth → Redireciona para autenticação OAuth2 Tiny
+router.get('/', (req, res) => {
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: process.env.CLIENT_ID,
     redirect_uri: process.env.REDIRECT_URI,
-    scope: SCOPES
+    scope: 'openid',
   });
-  res.redirect(`${OIDC_BASE}/auth?${params}`);
+
+  res.redirect(`https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?${params}`);
 });
 
+// GET /callback → Recebe o código e troca pelo token
 router.get('/callback', async (req, res) => {
   const code = req.query.code;
-  if (!code) return res.status(400).send('Código de autorização ausente');
+  if (!code) return res.status(400).send('Código ausente');
 
   try {
-    const resp = await axios.post(
-      `${OIDC_BASE}/token`,
-      qs.stringify({
+    const response = await axios.post(
+      'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
+      new URLSearchParams({
         grant_type: 'authorization_code',
         code,
         client_id: process.env.CLIENT_ID,
         client_secret: process.env.CLIENT_SECRET,
-        redirect_uri: process.env.REDIRECT_URI
+        redirect_uri: process.env.REDIRECT_URI,
       }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
     );
 
-    setAccessToken(resp.data.access_token);
-    console.log(`✅ Token obtido; expira em ${resp.data.expires_in}s`);
-    res.send('Autenticação concluída com sucesso!');
+    const token = response.data?.access_token;
+    if (!token) return res.status(500).send('Token não retornado pela API');
+
+    // Salva token global (ou no arquivo, banco etc)
+    global.tinyAccessToken = token;
+
+    console.log('✅ Token obtido com sucesso. Expira em', response.data.expires_in, 'segundos.');
+    res.send('✅ Token salvo com sucesso.');
   } catch (err) {
-    console.error('❌ Erro ao obter token:', err.response?.data || err.message);
-    res.status(500).send('Erro ao obter token');
-  }
-});
-
-router.get('/refresh', async (req, res) => {
-  const refreshToken = process.env.REFRESH_TOKEN;
-  if (!refreshToken) return res.status(400).send('Refresh token ausente');
-
-  try {
-    const resp = await axios.post(
-      `${OIDC_BASE}/token`,
-      qs.stringify({
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-        client_id: process.env.CLIENT_ID,
-        client_secret: process.env.CLIENT_SECRET
-      }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    );
-
-    setAccessToken(resp.data.access_token);
-    console.log(`🔄 Token renovado; expira em ${resp.data.expires_in}s`);
-    res.send('Token renovado com sucesso');
-  } catch (err) {
-    console.error('❌ Erro ao renovar token:', err.response?.data || err.message);
-    res.status(500).send('Erro ao renovar token');
+    console.error('❌ Erro no callback:', err.response?.data || err.message);
+    res.status(500).send('Erro ao salvar token');
   }
 });
 
