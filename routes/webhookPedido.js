@@ -87,7 +87,8 @@ router.post('/', async (req, res) => {
       return;
     }
 
-    console.log(`📄 Pedido completo recebido:\n`, JSON.stringify(pedido, null, 2));
+    console.log(`📄 Pedido completo recebido:
+`, JSON.stringify(pedido, null, 2));
 
     const fornecedores = await listarTodosFornecedores();
     const resultados = [];
@@ -155,34 +156,20 @@ router.post('/', async (req, res) => {
       }
 
       const payloadOC = gerarPayloadOrdemCompra({
-        origem: pedido.origem || 'comercial',
-        dataPedido: pedido.data || new Date().toISOString().split('T')[0],
-        dataPrevista: pedido.dataPrevista,
-        estimativaEntrega: 7,
-        condicaoPagamento: pedido.condicao || "A prazo 30 dias",
-        parcelas: pedido.parcelas || [],
-        vendedor: { nome: pedido?.vendedor?.nome || 'Desconhecido' },
-        pedidoNumero: numeroPedido,
-        contatoId: dadosParaOC.idFornecedor,
-        produto: {
-          id: dadosParaOC.produtoId,
-          sku: dadosParaOC.sku,
-          quantidade: dadosParaOC.quantidade,
-          valor: dadosParaOC.valorUnitario
-        },
-        fornecedor: {
-          id: dadosParaOC.idFornecedor,
-          nome: dadosParaOC.nomeFornecedor
-        },
         pedido: dadosParaOC.pedido,
-        produtoObj: dadosParaOC.produto
+        produto: dadosParaOC.produto,
+        sku: dadosParaOC.sku,
+        quantidade: dadosParaOC.quantidade,
+        valorUnitario: dadosParaOC.valorUnitario,
+        idFornecedor: dadosParaOC.idFornecedor
       });
 
       const resposta = await enviarOrdemCompra(payloadOC);
       resultados.push({ sku, fornecedor: fornecedorSelecionado.nome, status: resposta });
     }
 
-    console.log(`📦 Resultado final do processamento:\n`, resultados);
+    console.log(`📦 Resultado final do processamento:
+`, resultados);
   } catch (err) {
     console.error('❌ Erro geral no webhook:', err.message || err);
   }
