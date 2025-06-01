@@ -7,13 +7,14 @@ const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
 const { getPedidoCompletoById } = require('../services/tinyPedidoService');
-const { enviarNotificacaoWhatsapp } = require('../services/whatsappService'); // ⚠️ certifique-se que está criado
+const { enviarNotificacaoWhatsapp } = require('../services/whatsappService');
 const axios = require('axios');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 const MAX_PAGINAS = 10;
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const pedidosProcessados = new Set();
 
 function normalizarTexto(txt) {
   return txt?.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
@@ -55,13 +56,42 @@ router.post('/', async (req, res) => {
     const idPedido = req.body?.dados?.id;
     const numeroPedido = req.body?.dados?.numero;
 
+    console.log(`📥 Webhook recebido: ID ${idPedido}, Número ${numeroPedido}`);
+
     if (!idPedido || !numeroPedido) {
       console.warn('❌ Webhook sem ID ou número de pedido válido');
       return;
     }
 
+    if (pedidosProcessados.has(idPedido)) {
+      console.warn(`⏩ Pedido ID ${idPedido} já processado anteriormente. Ignorando duplicado.`);
+      return;
+    }
+    pedidosProcessados.add(idPedido);
+
+    const token = await getAccessToken();
+    if (!token) {
+      console.error('❌ Token de acesso não disponível. Abandonando fluxo.');
+      return;
+    }
+
+    console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido}...`);
     const pedido = await getPedidoCompletoById(idPedido);
-    if (!pedido?.itens?.length) return;
+
+    if (!pedido || !pedido.id || !pedido.numeroPedido) {
+      console.warn(`⚠️ Dados incompletos do pedido retornado. ID: ${idPedido}`);
+      await enviarNotificacaoWhatsapp(`⚠️ Pedido ${numeroPedido} – dados incompletos retornados. OC não gerada.`);
+      return;
+    }
+
+    if (!pedido.itens || !Array.isArray(pedido.itens) || pedido.itens.length === 0) {
+      console.warn(`⚠️ Pedido ${numeroPedido} retornado sem itens. Ignorando.`);
+      await enviarNotificacaoWhatsapp(`⚠️ Pedido ${numeroPedido} retornado sem itens. OC não gerada.`);
+      return;
+    }
+
+    console.log(`📄 Pedido completo recebido:\n`, JSON.stringify(pedido, null, 2));
+    console.log(`📦 Itens do pedido:\n`, JSON.stringify(pedido.itens, null, 2));
 
     const fornecedores = await listarTodosFornecedores();
     const resultados = [];
@@ -83,7 +113,6 @@ router.post('/', async (req, res) => {
         normalizarTexto(f.nome) === nomePadrao
       );
 
-      // Heurística se não encontrou match exato
       if (!fornecedorSelecionado) {
         fornecedorSelecionado = fornecedores.find(f =>
           normalizarTexto(f.nome).includes(marcaNormalizada) ||
@@ -91,7 +120,6 @@ router.post('/', async (req, res) => {
         );
       }
 
-      // Fallback IA
       if (!fornecedorSelecionado) {
         const respostaIA = await analisarPedidoViaIA({
           produtoSKU: sku,
@@ -102,19 +130,16 @@ router.post('/', async (req, res) => {
         if (respostaIA?.deveGerarOC && typeof respostaIA?.idFornecedor === 'number') {
           fornecedorSelecionado = fornecedores.find(f => f.id === respostaIA.idFornecedor);
         } else {
-          console.warn(`⚠️ IA não encontrou fornecedor para SKU ${sku} / Marca ${marca}`);
-          await enviarNotificacaoWhatsapp(`⚠️ Pedido ${numeroPedido} – Fornecedor não identificado para SKU ${sku}. OC não será gerada.`);
+          await enviarNotificacaoWhatsapp(`⚠️ Pedido ${numeroPedido} – IA não encontrou fornecedor para SKU ${sku}`);
           continue;
         }
       }
 
       if (!fornecedorSelecionado?.id) {
-        console.warn(`⚠️ Fornecedor inválido detectado para SKU ${sku}`);
-        await enviarNotificacaoWhatsapp(`⚠️ Pedido ${numeroPedido} – Fornecedor inválido para SKU ${sku}.`);
+        await enviarNotificacaoWhatsapp(`⚠️ Pedido ${numeroPedido} – Fornecedor inválido para SKU ${sku}`);
         continue;
       }
 
-      // Preparar dados para gerarPayloadOrdemCompra
       const dadosParaOC = {
         produtoId: produto.id,
         quantidade: item.quantidade || 1,
@@ -126,12 +151,11 @@ router.post('/', async (req, res) => {
         produto
       };
 
-      // Validação final antes de gerar payload
       const obrigatorios = ['produtoId', 'quantidade', 'valorUnitario', 'sku', 'idFornecedor', 'nomeFornecedor'];
       const faltando = obrigatorios.filter(c => !dadosParaOC[c]);
       if (faltando.length) {
         console.error(`❌ Campos obrigatórios faltando para SKU ${sku}:`, faltando);
-        await enviarNotificacaoWhatsapp(`❌ Pedido ${numeroPedido} – Campos ausentes: ${faltando.join(', ')}. OC não enviada.`);
+        await enviarNotificacaoWhatsapp(`❌ Pedido ${numeroPedido} – Campos ausentes: ${faltando.join(', ')}`);
         continue;
       }
 
