@@ -1,43 +1,49 @@
-const fs = require('fs');
-const path = require('path');
+const { createClient } = require('redis');
 const axios = require('axios');
 
-const TOKEN_PATH = path.join(__dirname, '..', 'token.json');
+const redis = createClient({
+  url: process.env.REDIS_URL,
+});
+
+redis.on('error', err => console.error('❌ Erro no Redis:', err));
+
+const TOKEN_KEY = 'tiny:token';
 
 /**
- * Salva o token completo e calcula a data de expiração.
+ * Conecta ao Redis se ainda não estiver conectado
  */
-function salvarToken(tokenData) {
-  try {
-    tokenData.expires_at = Date.now() + tokenData.expires_in * 1000;
-    fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokenData, null, 2), 'utf-8');
-    console.log('💾 Token salvo em token.json');
-  } catch (err) {
-    console.error('❌ Erro ao salvar token:', err.message);
+async function conectarRedis() {
+  if (!redis.isOpen) {
+    await redis.connect();
   }
 }
 
 /**
- * Lê o token salvo no disco.
+ * Salva token no Redis e adiciona campo expires_at com timestamp
  */
-function lerToken() {
-  try {
-    if (!fs.existsSync(TOKEN_PATH)) return null;
-    const raw = fs.readFileSync(TOKEN_PATH, 'utf-8');
-    return JSON.parse(raw);
-  } catch (err) {
-    console.error('❌ Erro ao ler token:', err.message);
-    return null;
-  }
+async function salvarToken(tokenData) {
+  await conectarRedis();
+  tokenData.expires_at = Date.now() + tokenData.expires_in * 1000;
+  await redis.set(TOKEN_KEY, JSON.stringify(tokenData));
+  console.log('💾 Token salvo no Redis com expiração em:', new Date(tokenData.expires_at).toISOString());
 }
 
 /**
- * Usa o refresh_token da Tiny para obter um novo access_token.
+ * Recupera token do Redis (completo)
+ */
+async function lerToken() {
+  await conectarRedis();
+  const raw = await redis.get(TOKEN_KEY);
+  if (!raw) return null;
+  return JSON.parse(raw);
+}
+
+/**
+ * Renova o access_token usando o refresh_token
  */
 async function renovarToken(tokenAtual) {
+  console.log('🔄 Token expirado. Tentando renovar com refresh_token...');
   try {
-    console.log('🔄 Token expirado. Tentando renovar com refresh_token...');
-
     const response = await axios.post(
       'https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/token',
       new URLSearchParams({
@@ -59,19 +65,20 @@ async function renovarToken(tokenAtual) {
       return null;
     }
 
-    salvarToken(response.data);
+    await salvarToken(response.data);
     return response.data.access_token;
+
   } catch (err) {
-    console.error('❌ Erro ao renovar token:', err.message);
+    console.error('❌ Falha ao renovar token:', err.message);
     return null;
   }
 }
 
 /**
- * Obtém o access_token atual, renovando se necessário.
+ * Obtém o access_token válido (renova automaticamente se necessário)
  */
 async function getAccessToken() {
-  const token = lerToken();
+  const token = await lerToken();
   if (!token) return null;
 
   const agora = Date.now();
