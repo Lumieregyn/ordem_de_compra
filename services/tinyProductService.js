@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
 
+// 📦 Lista paginada de produtos da Tiny
 async function listarProdutosTiny() {
   let token = await getAccessToken();
   if (!token) {
@@ -39,7 +40,7 @@ async function listarProdutosTiny() {
 
       pagina++;
       await new Promise(res => setTimeout(res, 1000)); // ⏱️ Delay para evitar erro 429
-      if (pagina > 3) break; // ⚠️ LIMITADOR DE TESTE
+      if (pagina > 3) break; // ⚠️ LIMITADOR DE TESTE — remova em produção
     }
 
     console.log(`✅ ${produtos.length} produtos carregados da Tiny`);
@@ -50,38 +51,50 @@ async function listarProdutosTiny() {
   }
 }
 
+// 🔍 Consulta individual de produto com retry automático em 401
 async function getProdutoFromTinyV3(produtoId) {
+  console.log(`🔍 Buscando produto ID: ${produtoId}`);
+
   let token = await getAccessToken();
   if (!token) {
-    console.warn('⚠️ Token da Tiny não encontrado.');
+    console.error('❌ Token OAuth2 não encontrado. Abortando requisição.');
     return null;
   }
 
+  const url = `https://erp.tiny.com.br/public-api/v3/produtos/${produtoId}`;
+
   try {
-    const resp = await axios.get(`https://erp.tiny.com.br/public-api/v3/produtos/${produtoId}`, {
+    const resp = await axios.get(url, {
       headers: { Authorization: `Bearer ${token}` }
     });
 
+    console.log(`✅ Produto ID ${produtoId} carregado com sucesso (Status: ${resp.status})`);
     return resp.data?.retorno?.produto || null;
+
   } catch (err) {
-    // Proteção extra: tentar renovar se for erro 401
-    if (err.response?.status === 401) {
+    const status = err.response?.status;
+    const msg = err.response?.data?.mensagem || err.message;
+
+    if (status === 401) {
       console.warn(`⚠️ Token expirado. Tentando nova tentativa para produto ID ${produtoId}...`);
-      token = await getAccessToken(true); // força renovação se sua função aceitar isso
+
+      token = await getAccessToken(true); // Força renovação
 
       try {
-        const retry = await axios.get(`https://erp.tiny.com.br/public-api/v3/produtos/${produtoId}`, {
+        const retry = await axios.get(url, {
           headers: { Authorization: `Bearer ${token}` }
         });
 
+        console.log(`✅ Produto ID ${produtoId} carregado após renovação (Status: ${retry.status})`);
         return retry.data?.retorno?.produto || null;
+
       } catch (retryErr) {
-        console.error('❌ Mesmo após renovar token, falhou:', retryErr.response?.data || retryErr.message);
+        console.error(`❌ Falha mesmo após renovar token para produto ID ${produtoId}:`, retryErr.response?.data || retryErr.message);
         return null;
       }
     }
 
-    console.error(`❌ Erro ao buscar produto ID ${produtoId}:`, err.response?.data || err.message);
+    console.error(`❌ Erro ao buscar produto ID ${produtoId} (Status: ${status}): ${msg}`);
     return null;
   }
 }
