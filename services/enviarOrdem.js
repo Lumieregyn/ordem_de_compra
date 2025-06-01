@@ -10,7 +10,8 @@ async function enviarOrdemCompra(payload) {
   try {
     const token = await getAccessToken();
 
-    if (!payload || !payload.itens || !payload.fornecedor?.id) {
+    // 🔧 Validação ajustada para o novo padrão do Bloco 4
+    if (!payload || !payload.itens || !payload.itens.length || !payload.contato?.id) {
       console.warn('[OC ⚠️] Payload incompleto. Cancelando envio.', payload);
       return null;
     }
