@@ -4,52 +4,49 @@ const { getAccessToken } = require('./tokenService');
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 const MAX_TENTATIVAS = 5;
 
-/**
- * Busca os dados completos de um pedido Tiny usando o ID (entregue pelo webhook).
- * Compatível com a resposta atual da API Tiny (dados no nível raiz).
- */
-async function getPedidoCompletoById(idPedido) {
-  const token = getAccessToken();
+async function getPedidoCompletoById(id) {
+  const token = await getAccessToken();
   if (!token) throw new Error('Token de acesso à API Tiny não disponível');
-
-  const url = `${TINY_API_V3_BASE}/pedidos/${idPedido}?completo=true`;
 
   for (let tentativa = 1; tentativa <= MAX_TENTATIVAS; tentativa++) {
     try {
-      console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido} (tentativa ${tentativa})`);
+      console.log(`📡 Buscando pedido completo via API V3: ID ${id} (tentativa ${tentativa})`);
 
+      const url = `${TINY_API_V3_BASE}/pedidos/${id}?completo=true`;
       const response = await axios.get(url, {
         headers: { Authorization: `Bearer ${token}` },
-        validateStatus: () => true // ✅ captura todos os status, mesmo erros
+        validateStatus: () => true, // ✅ captura mesmo status ≠ 200
       });
 
       const pedido = response.data;
 
-      if (!pedido || !pedido.id || !pedido.numeroPedido || !pedido.itens) {
-        console.warn(`⚠️ Pedido ID ${idPedido} retornou incompleto. Log completo da resposta:`);
-        console.dir(response.data, { depth: null });
-        throw new Error(`Pedido ID ${idPedido} retornou incompleto ou inválido.`);
+      // 🔍 DEBUG opcional
+      if (typeof pedido !== 'object' || Object.keys(pedido).length === 0) {
+        console.warn(`⚠️ Pedido ID ${id} retornou resposta vazia ou em branco`);
       }
 
-      console.log(`✅ Pedido ${pedido.numeroPedido} carregado com sucesso (ID: ${idPedido})`);
+      if (!pedido || !pedido.id || !pedido.numeroPedido || !pedido.itens) {
+        throw new Error(`Pedido ID ${id} retornou incompleto ou inválido.`);
+      }
+
       return pedido;
 
-    } catch (error) {
-      const status = error?.response?.status || 'desconhecido';
-      const msg = error?.message || 'Erro inesperado';
+    } catch (err) {
+      const espera = tentativa * 5000; // espera progressiva: 5s, 10s, 15s...
 
-      console.warn(`⏳ Erro ao buscar pedido ID ${idPedido} | Tentativa ${tentativa} | Status: ${status} | ${msg}`);
-
+      console.warn(`⏳ Erro ao buscar pedido ID ${id} | Tentativa ${tentativa} | Status: desconhecido | ${err.message}`);
       if (tentativa < MAX_TENTATIVAS) {
-        const delay = tentativa * 5000;
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise(resolve => setTimeout(resolve, espera));
       } else {
-        throw new Error(`Erro ao buscar pedido ${idPedido}: ${msg}`);
+        console.error(`❌ Falha final ao buscar pedido ${id}: ${err.message}`);
+        throw err;
       }
     }
   }
 }
 
 module.exports = {
-  getPedidoCompletoById
+  getPedidoCompletoById,
+  // ... outros exports existentes, ex:
+  // getPedidoCompletoByNumero
 };
