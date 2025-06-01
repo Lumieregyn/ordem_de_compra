@@ -1,9 +1,9 @@
 const { addBusinessDays } = require('date-fns');
 
 /**
- * Gera o payload completo e válido para envio da Ordem de Compra na API Tiny v3
+ * Gera o payload da Ordem de Compra conforme o padrão da API Tiny v3
  * @param {Object} dados
- * @returns {Object} payload JSON completo
+ * @returns {Object} JSON pronto para envio
  */
 function gerarPayloadOrdemCompra(dados) {
   const {
@@ -15,8 +15,21 @@ function gerarPayloadOrdemCompra(dados) {
     idFornecedor
   } = dados;
 
-  // ✅ Validações básicas
-  if (!pedido?.data || !produto?.id || !idFornecedor || !quantidade || !valorUnitario) {
+  // 🧪 Validação detalhada com logs
+  const erros = [];
+
+  if (!produto?.id) erros.push('produto.id');
+  if (!idFornecedor) erros.push('idFornecedor');
+  if (!valorUnitario) erros.push('valorUnitario');
+  if (!quantidade) erros.push('quantidade');
+  if (!sku) erros.push('sku');
+  if (!pedido) erros.push('pedido');
+  if (!produto) erros.push('produto');
+
+  if (erros.length > 0) {
+    erros.forEach(campo => {
+      console.warn(`[Bloco 4 ⚠️] Campo ausente: ${campo}`);
+    });
     throw new Error('Dados obrigatórios ausentes no Bloco 4');
   }
 
@@ -27,10 +40,10 @@ function gerarPayloadOrdemCompra(dados) {
     .toISOString()
     .split('T')[0];
 
-  // 💰 Cálculo do valor total
+  // 💰 Cálculo da parcela
   const valorTotal = Number((quantidade * valorUnitario).toFixed(2));
 
-  // 🧾 Montagem do payload final
+  // 🧾 Payload final
   const payload = {
     data: dataPedido,
     dataPrevista,
