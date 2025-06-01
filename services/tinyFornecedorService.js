@@ -3,29 +3,33 @@ const axios = require('axios');
 const BASE_URL = 'https://api.tiny.com.br/api2/fornecedores.pesquisa.php';
 const API_TOKEN = process.env.TINY_API_TOKEN;
 
-// Utilitário para aguardar (evita 429)
+// Delay para evitar erro 429
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function listarTodosFornecedores() {
-  const fornecedores = [];
-  const maxPaginas = 10; // limite de segurança
-  const delayEntreRequisicoes = 800; // em milissegundos
+  const fornecedoresMap = new Map();
+  const maxPaginas = 10;
+  const delayEntreRequisicoes = 800;
 
   for (let pagina = 1; pagina <= maxPaginas; pagina++) {
     try {
-      const url = `${BASE_URL}?token=${API_TOKEN}&formato=json&pagina=${pagina}&nome=FORNECEDOR`;
+      const url = `${BASE_URL}?token=${API_TOKEN}&formato=json&pagina=${pagina}&nome=FORNECEDOR%20`;
       const response = await axios.get(url);
       const lista = response.data?.retorno?.fornecedores || [];
 
-      if (lista.length === 0) break; // fim da lista
+      if (lista.length === 0) break;
 
       lista.forEach(item => {
-        if (item?.fornecedor) {
-          fornecedores.push(item.fornecedor);
+        const f = item?.fornecedor;
+        if (
+          f?.id &&
+          f?.nome?.toUpperCase().startsWith('FORNECEDOR ') &&
+          f?.tipoPessoa === 'J'
+        ) {
+          fornecedoresMap.set(f.id, f); // evita duplicatas
         }
       });
 
-      // Verifica se é a última página
       const ultimaPagina = response.data?.retorno?.pagina?.ultima === "true";
       if (ultimaPagina) break;
 
@@ -36,7 +40,8 @@ async function listarTodosFornecedores() {
     }
   }
 
-  console.log(`[listarTodosFornecedores] Total retornado: ${fornecedores.length}`);
+  const fornecedores = Array.from(fornecedoresMap.values());
+  console.log(`[listarTodosFornecedores] Total filtrado: ${fornecedores.length}`);
   return fornecedores;
 }
 
