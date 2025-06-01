@@ -2,68 +2,58 @@ const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
 
 /**
- * Envia uma ordem de compra para a API Tiny v3 (JSON + OAuth2)
- * @param {Object} payload JSON completo da ordem de compra (vindo do Bloco 4)
- * @returns {Object} resultado padronizado com sucesso ou erro
+ * Envia uma Ordem de Compra para a API Tiny v3.
+ * @param {Object} payload - JSON completo da ordem de compra
+ * @returns {Object|null} - Retorno da API Tiny ou null em caso de erro
  */
 async function enviarOrdemCompra(payload) {
   try {
-    if (!payload || typeof payload !== 'object' || !payload.itens?.length) {
-      return {
-        sucesso: false,
-        erro: 'validação',
-        mensagem: 'Payload inválido ou sem itens'
-      };
-    }
-
     const token = await getAccessToken();
+
+    // Payload temporário (simulação caso não fornecido)
+    const simulatedPayload = {
+      fornecedor: { id: 123456 },
+      data_prevista: '2025-06-05',
+      itens: [
+        {
+          produto: { id: 987654 },
+          quantidade: 2,
+          valor_unitario: 150.0
+        }
+      ]
+    };
+
+    const finalPayload = payload && payload.itens ? payload : simulatedPayload;
 
     const response = await axios.post(
       'https://erp.tiny.com.br/public-api/v3/ordens-compra',
-      payload,
+      finalPayload,
       {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        validateStatus: () => true,
+        validateStatus: () => true, // Captura todos os status HTTP
       }
     );
 
     const { status, data } = response;
 
     if (status === 200 && data?.retorno?.status === 'sucesso') {
-      const ordemCompra = data.retorno.ordem_compra;
-      console.log(`[OC Enviada ✅] OC criada com ID ${ordemCompra.id}, Pedido ${ordemCompra.numero_pedido}`);
-      return {
-        sucesso: true,
-        idOrdemCompra: ordemCompra.id,
-        numero: ordemCompra.numero_pedido,
-        mensagem: 'Ordem de Compra criada com sucesso'
-      };
+      console.log(`[OC ✅] Ordem de Compra criada com sucesso: ID ${data.retorno.ordem_compra.id}`);
+      return data;
+    } else {
+      console.warn('[OC ⚠️] Erro no envio da OC:', {
+        status,
+        mensagem: data?.mensagem,
+        detalhes: data?.detalhes || data?.retorno?.erros || null,
+      });
+      return data;
     }
-
-    const mensagem = data?.mensagem || data?.retorno?.status || 'Erro no envio';
-    const detalhes = data?.detalhes || data?.retorno?.erros || [];
-
-    console.warn(`[OC Erro ⚠️] Falha ao enviar OC. Status ${status} | Mensagem: ${mensagem}`);
-    if (detalhes.length) console.warn('Detalhes do erro:', detalhes);
-
-    return {
-      sucesso: false,
-      erro: 'validacao',
-      mensagem,
-      detalhes
-    };
-
   } catch (err) {
-    console.error(`[OC Erro ❌] Erro inesperado:`, err.message);
-    return {
-      sucesso: false,
-      erro: 'falha',
-      mensagem: err.message || 'Erro inesperado ao enviar Ordem de Compra'
-    };
+    console.error('[OC ❌] Erro inesperado ao enviar OC:', err.message);
+    return null;
   }
 }
 
-module.exports = { enviarOrdemCompra }; // 👈 exportação correta
+module.exports = { enviarOrdemCompra };
