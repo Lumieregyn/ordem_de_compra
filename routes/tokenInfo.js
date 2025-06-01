@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const { getAccessToken } = require('../services/tokenService');
 const { createClient } = require('redis');
 
 const redis = createClient({ url: process.env.REDIS_URL });
@@ -20,7 +19,7 @@ router.get('/', async (req, res) => {
 
     if (tempoRestanteMs <= 0) {
       return res.json({
-        status: '⚠️ Token expirado',
+        status: '❌ Token expirado',
         expira_em: '0s',
         expira_em_iso: new Date(expiresAt).toISOString()
       });
@@ -29,13 +28,18 @@ router.get('/', async (req, res) => {
     const minutos = Math.floor(tempoRestanteMs / 60000);
     const segundos = Math.floor((tempoRestanteMs % 60000) / 1000);
 
+    // Alerta visual se estiver abaixo de 10 minutos
+    const status =
+      tempoRestanteMs < 10 * 60 * 1000
+        ? '⚠️ Token prestes a expirar'
+        : '✅ Token válido';
+
     res.json({
-      status: '✅ Token válido',
-      access_token: token.access_token.slice(0, 20) + '...', // parcial
+      status,
+      access_token: token.access_token.slice(0, 20) + '...',
       expira_em: `${minutos}min ${segundos}s`,
       expira_em_iso: new Date(expiresAt).toISOString()
     });
-
   } catch (err) {
     console.error('❌ Erro em /token/info:', err.message);
     res.status(500).json({ erro: 'Erro ao consultar token' });
