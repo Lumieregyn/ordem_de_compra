@@ -1,11 +1,17 @@
 const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
 
-// 📦 Lista paginada de produtos da Tiny
+// 📦 Lista paginada de produtos da Tiny ERP
 async function listarProdutosTiny() {
-  let token = await getAccessToken();
-  if (!token) {
-    console.warn('⚠️ Token da Tiny não encontrado.');
+  let token;
+  try {
+    token = await getAccessToken();
+    if (!token) {
+      console.warn('⚠️ Token da Tiny não encontrado.');
+      return [];
+    }
+  } catch (err) {
+    console.error('❌ Erro ao obter token do Redis:', err.message);
     return [];
   }
 
@@ -45,85 +51,54 @@ async function listarProdutosTiny() {
 
     console.log(`✅ ${produtos.length} produtos carregados da Tiny`);
     return produtos;
+
   } catch (err) {
     console.error('❌ Erro ao buscar produtos da Tiny:', err.response?.data || err.message);
     return [];
   }
 }
 
-// 🔍 Consulta individual de produto com validação e fallback 401
+// 🔍 Consulta individual de produto via ID no Tiny ERP (API v3)
 async function getProdutoFromTinyV3(produtoId) {
   console.log(`🔍 Buscando produto ID: ${produtoId}`);
 
-  let token = await getAccessToken();
-  if (!token) {
-    console.error('❌ Token OAuth2 não encontrado. Abortando requisição.');
+  let token;
+  try {
+    token = await getAccessToken();
+    if (!token) {
+      console.error('❌ Token OAuth2 não encontrado. Abortando requisição.');
+      return null;
+    }
+  } catch (err) {
+    console.error('❌ Erro ao obter token do Redis:', err.message);
     return null;
   }
 
   const url = `https://erp.tiny.com.br/public-api/v3/produtos/${produtoId}`;
 
   try {
-    const resp = await axios.get(url, {
+    const response = await axios.get(url, {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       }
     });
 
-    const produto = resp.data?.produto || resp.data?.retorno?.produto;
-
-    if (!produto) {
-      console.warn(`⚠️ Produto não encontrado na resposta. ID: ${produtoId}`);
-      console.dir(resp.data, { depth: null });
+    if (response.status !== 200) {
+      console.error(`❌ Resposta inesperada da API (Status: ${response.status})`);
       return null;
     }
 
-    const { sku, descricao, marca } = produto;
-
-    if (!sku || !descricao || !marca?.nome) {
-      console.warn(`⚠️ Produto incompleto detectado (ID: ${produtoId}). Dados ausentes:`);
-      if (!sku) console.warn('- SKU ausente');
-      if (!descricao) console.warn('- Descrição ausente');
-      if (!marca?.nome) console.warn('- Marca ausente');
-      console.dir(resp.data, { depth: null });
-    }
-
     console.log(`✅ Produto ID ${produtoId} carregado com sucesso`);
-    return produto;
+    return response.data;
 
-  } catch (err) {
-    const status = err.response?.status;
-    const msg = err.response?.data?.mensagem || err.message;
+  } catch (error) {
+    const status = error.response?.status;
+    const msg = error.response?.data || error.message;
 
-    if (status === 401) {
-      console.warn(`⚠️ Token expirado. Tentando nova tentativa para produto ID ${produtoId}...`);
+    console.error(`❌ Erro ao buscar produto ID ${produtoId} (Status: ${status}):`);
+    console.error(msg);
 
-      token = await getAccessToken(true); // força renovação
-
-      try {
-        const retry = await axios.get(url, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-
-        const produto = retry.data?.produto || retry.data?.retorno?.produto;
-
-        if (!produto) {
-          console.warn(`⚠️ Produto não encontrado mesmo após renovação. ID: ${produtoId}`);
-          console.dir(retry.data, { depth: null });
-          return null;
-        }
-
-        console.log(`✅ Produto ID ${produtoId} carregado após renovação`);
-        return produto;
-
-      } catch (retryErr) {
-        console.error(`❌ Falha mesmo após renovar token para produto ID ${produtoId}:`, retryErr.response?.data || retryErr.message);
-        return null;
-      }
-    }
-
-    console.error(`❌ Erro ao buscar produto ID ${produtoId} (Status: ${status}): ${msg}`);
     return null;
   }
 }
