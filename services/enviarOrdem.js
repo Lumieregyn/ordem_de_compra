@@ -6,7 +6,7 @@ const { getAccessToken } = require('./tokenService');
  * @param {Object} payload JSON completo da ordem de compra (vindo do Bloco 4)
  * @returns {Object} resultado padronizado com sucesso ou erro
  */
-async function enviarOrdemCompraV3(payload) {
+async function enviarOrdemCompra(payload) {
   try {
     if (!payload || typeof payload !== 'object' || !payload.itens?.length) {
       return {
@@ -26,7 +26,7 @@ async function enviarOrdemCompraV3(payload) {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        validateStatus: () => true, // Permite tratar status 400+
+        validateStatus: () => true,
       }
     );
 
@@ -43,7 +43,6 @@ async function enviarOrdemCompraV3(payload) {
       };
     }
 
-    // Se houver erros da Tiny (validação, campos obrigatórios etc.)
     const mensagem = data?.mensagem || data?.retorno?.status || 'Erro no envio';
     const detalhes = data?.detalhes || data?.retorno?.erros || [];
 
@@ -58,7 +57,6 @@ async function enviarOrdemCompraV3(payload) {
     };
 
   } catch (err) {
-    // Falha crítica
     console.error(`[OC Erro ❌] Erro inesperado:`, err.message);
     return {
       sucesso: false,
@@ -68,4 +66,4 @@ async function enviarOrdemCompraV3(payload) {
   }
 }
 
-module.exports = { enviarOrdemCompraV3 };
+module.exports = { enviarOrdemCompra }; // 👈 exportação correta
