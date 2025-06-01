@@ -5,7 +5,7 @@ const { getProdutoFromTinyV3 } = require('../services/tinyProductService');
 const { getAccessToken } = require('../services/tokenService');
 const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
-const { getPedidoCompletoById } = require('../services/tinyPedidoService'); // ✅ Importação correta
+const { getPedidoCompletoById } = require('../services/tinyPedidoService'); // ✅ Nova função importada
 const axios = require('axios');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
@@ -61,9 +61,8 @@ router.post('/', async (req, res) => {
   res.status(200).send('Webhook recebido ✅');
 
   try {
-    const body = req.body;
-    const idPedido = body?.dados?.id;
-    const numeroPedido = body?.dados?.numero;
+    const idPedido = req.body?.dados?.id;
+    const numeroPedido = req.body?.dados?.numero;
 
     if (!idPedido || !numeroPedido) {
       console.warn('❌ Webhook sem ID ou número de pedido válido');
