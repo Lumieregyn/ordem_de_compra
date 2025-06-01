@@ -10,7 +10,8 @@ const { getProdutoFromTinyV3 } = require('./services/tinyProductService');
 const listarMarcasRoute = require('./routes/listarMarcas');
 const webhookPedidoRoute = require('./routes/webhookPedido');
 const tokenDebugRoute = require('./routes/tokenDebug');
-const authRoutes = require('./routes/auth'); // ✅ NOVO
+const authRoutes = require('./routes/auth');
+const tokenInfoRoute = require('./routes/tokenInfo'); // ✅ NOVO
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -23,19 +24,16 @@ app.get('/', (req, res) => {
   res.send('🚀 API Tiny Sync ativa.');
 });
 
-// 🔐 Autenticação OAuth2 Tiny ERP
-app.use('/', authRoutes); // ✅ /auth e /callback
+// 🔐 Fluxo OAuth2 (auth e callback)
+app.use('/', authRoutes);
 
-// 🔐 Verificar token atual
+// 🛠️ Visualizar token bruto
 app.use('/debug-token', tokenDebugRoute);
 
-app.get('/token', (req, res) => {
-  const token = getAccessToken();
-  if (!token) return res.status(404).send('Token não encontrado');
-  res.json({ token });
-});
+// 📊 Ver tempo restante do token
+app.use('/token/info', tokenInfoRoute); // ✅ NOVA ROTA
 
-// 🔄 Sincronizar produtos Tiny com Mongo (se aplicável)
+// 🔄 Sincronizar produtos Tiny (opcional)
 app.get('/sync-produtos', async (req, res) => {
   try {
     const resultado = await processarProdutosTiny();
@@ -59,13 +57,13 @@ app.get('/testar-marca-ia/:id', async (req, res) => {
   }
 });
 
-// 📦 Listar marcas (via Tiny)
+// 📦 Listar marcas disponíveis
 app.use('/listar-marcas', listarMarcasRoute);
 
-// 📩 Webhook oficial da Tiny para pedidos aprovados
+// 📩 Receber webhooks de pedidos Tiny
 app.use('/webhook-pedido', webhookPedidoRoute);
 
-// 🚀 Start server
+// 🚀 Start
 app.listen(PORT, () => {
   console.log(`🌐 Servidor rodando na porta ${PORT}`);
 });
