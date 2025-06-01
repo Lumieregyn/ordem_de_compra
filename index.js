@@ -10,8 +10,8 @@ const { getProdutoFromTinyV3 } = require('./services/tinyProductService');
 const listarMarcasRoute = require('./routes/listarMarcas');
 const webhookPedidoRoute = require('./routes/webhookPedido');
 const tokenDebugRoute = require('./routes/tokenDebug');
-const authRoutes = require('./routes/auth');
-const tokenInfoRoute = require('./routes/tokenInfo'); // ✅ NOVO
+const authRoutes = require('./routes/auth'); // ✅ Confirmação explícita
+const tokenInfoRoute = require('./routes/tokenInfo'); // ✅ Nova rota ativa
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -24,16 +24,16 @@ app.get('/', (req, res) => {
   res.send('🚀 API Tiny Sync ativa.');
 });
 
-// 🔐 Fluxo OAuth2 (auth e callback)
-app.use('/', authRoutes);
+// 🔐 Rotas de autenticação com Tiny
+app.use('/', authRoutes); // inclui /auth e /callback
 
-// 🛠️ Visualizar token bruto
+// 📊 Verificar tempo restante do token
+app.use('/token/info', tokenInfoRoute);
+
+// 🛠️ Debug do token atual (bruto)
 app.use('/debug-token', tokenDebugRoute);
 
-// 📊 Ver tempo restante do token
-app.use('/token/info', tokenInfoRoute); // ✅ NOVA ROTA
-
-// 🔄 Sincronizar produtos Tiny (opcional)
+// 🔄 Sincronizar produtos Tiny (se necessário)
 app.get('/sync-produtos', async (req, res) => {
   try {
     const resultado = await processarProdutosTiny();
@@ -44,7 +44,7 @@ app.get('/sync-produtos', async (req, res) => {
   }
 });
 
-// 🤖 Testar inferência de marca via IA
+// 🤖 Testar IA de marca por ID
 app.get('/testar-marca-ia/:id', async (req, res) => {
   const produtoId = req.params.id;
   try {
@@ -57,13 +57,13 @@ app.get('/testar-marca-ia/:id', async (req, res) => {
   }
 });
 
-// 📦 Listar marcas disponíveis
+// 📦 Listar marcas únicas
 app.use('/listar-marcas', listarMarcasRoute);
 
-// 📩 Receber webhooks de pedidos Tiny
+// 📩 Webhook para pedidos Tiny
 app.use('/webhook-pedido', webhookPedidoRoute);
 
-// 🚀 Start
+// 🚀 Início do servidor
 app.listen(PORT, () => {
   console.log(`🌐 Servidor rodando na porta ${PORT}`);
 });
