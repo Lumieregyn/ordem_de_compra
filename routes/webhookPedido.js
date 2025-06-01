@@ -87,21 +87,31 @@ router.post('/', async (req, res) => {
       return;
     }
 
-    console.log(`📄 Pedido completo recebido:\n`, JSON.stringify(pedido, null, 2));
-
     const fornecedores = await listarTodosFornecedores();
     const resultados = [];
 
     for (const item of pedido.itens) {
       const produtoId = item.produto?.id;
-      if (!produtoId) continue;
+      const quantidade = item.quantidade || 1;
+      const valorUnitario = item.valorUnitario || item.valor_unitario || 0;
+
+      if (!produtoId) {
+        console.warn(`⚠️ Item sem produtoId. Ignorando.`);
+        continue;
+      }
 
       const produto = await getProdutoFromTinyV3(produtoId);
-      if (!produto) continue;
+      if (!produto) {
+        console.warn(`⚠️ Produto ID ${produtoId} não encontrado. Ignorando item.`);
+        continue;
+      }
 
       const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
       const marca = produto.marca?.nome?.trim();
-      if (!marca) continue;
+      if (!marca) {
+        console.warn(`⚠️ Produto SKU ${sku} sem marca. Ignorando.`);
+        continue;
+      }
 
       const marcaNormalizada = normalizarTexto(marca);
       const nomePadrao = `FORNECEDOR ${marcaNormalizada}`;
@@ -126,15 +136,15 @@ router.post('/', async (req, res) => {
         if (respostaIA?.deveGerarOC && typeof respostaIA?.idFornecedor === 'number') {
           fornecedorSelecionado = fornecedores.find(f => f.id === respostaIA.idFornecedor);
         } else {
-          console.warn(`⚠️ Pedido ${numeroPedido} – IA não encontrou fornecedor para SKU ${sku}`);
+          console.warn(`⚠️ IA não encontrou fornecedor para SKU ${sku}`);
           continue;
         }
       }
 
-      const dadosParaOC = {
+      const camposObrigatorios = {
         produtoId: produto.id,
-        quantidade: item.quantidade || 1,
-        valorUnitario: item.valorUnitario || item.valor_unitario || 0,
+        quantidade,
+        valorUnitario,
         sku,
         idFornecedor: fornecedorSelecionado?.id,
         nomeFornecedor: fornecedorSelecionado?.nome,
@@ -142,31 +152,28 @@ router.post('/', async (req, res) => {
         produto
       };
 
-      const obrigatorios = [
-        'produtoId',
-        'quantidade',
-        'valorUnitario',
-        'sku',
-        'idFornecedor',
-        'nomeFornecedor',
-        'pedido',
-        'produto'
-      ];
+      const camposFaltando = Object.entries(camposObrigatorios)
+        .filter(([_, v]) => !v)
+        .map(([k]) => k);
 
-      const faltando = obrigatorios.filter(c => !dadosParaOC[c]);
-      if (faltando.length) {
-        console.warn(`⚠️ Campos ausentes para SKU ${sku}: ${faltando.join(', ')}`);
+      if (camposFaltando.length) {
+        console.warn(`❌ Pedido ${numeroPedido} – Campos obrigatórios ausentes para SKU ${sku}:`, camposFaltando);
         continue;
       }
 
       const payloadOC = gerarPayloadOrdemCompra({
-        pedido: dadosParaOC.pedido,
-        produto: dadosParaOC.produto,
-        sku: dadosParaOC.sku,
-        quantidade: dadosParaOC.quantidade,
-        valorUnitario: dadosParaOC.valorUnitario,
-        idFornecedor: dadosParaOC.idFornecedor
+        pedido,
+        produto,
+        sku,
+        quantidade,
+        valorUnitario,
+        idFornecedor: fornecedorSelecionado.id
       });
+
+      if (!payloadOC || typeof payloadOC !== 'object' || !payloadOC.itens?.length) {
+        console.warn(`❌ Payload da OC inválido ou incompleto para SKU ${sku}.`);
+        continue;
+      }
 
       const resposta = await enviarOrdemCompra(payloadOC);
       resultados.push({ sku, fornecedor: fornecedorSelecionado.nome, status: resposta });
