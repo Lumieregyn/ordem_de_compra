@@ -67,4 +67,21 @@ async function enviarOrdemCompra(payload) {
 
     if (status === 200 && sucesso) {
       const { id, numero_pedido } = data.retorno.ordem_compra;
-      console.log(`[OC ✅] Ordem de Compra criada com
+      console.log(`[OC ✅] Ordem de Compra criada com sucesso: ID ${id}, Pedido ${numero_pedido}`);
+    } else {
+      console.warn('[OC ⚠️] Erro no envio da OC:', {
+        status,
+        mensagem: data?.mensagem,
+        detalhes: data?.detalhes || data?.retorno?.erros || [],
+      });
+    }
+
+    return data;
+
+  } catch (err) {
+    console.error('[OC ❌] Erro inesperado ao enviar OC:', err.message);
+    return null;
+  }
+}
+
+module.exports = { enviarOrdemCompra };
