@@ -10,30 +10,20 @@ async function enviarOrdemCompra(payload) {
   try {
     const token = await getAccessToken();
 
-    // Payload temporário (simulação caso não fornecido)
-    const simulatedPayload = {
-      fornecedor: { id: 123456 },
-      data_prevista: '2025-06-05',
-      itens: [
-        {
-          produto: { id: 987654 },
-          quantidade: 2,
-          valor_unitario: 150.0
-        }
-      ]
-    };
-
-    const finalPayload = payload && payload.itens ? payload : simulatedPayload;
+    if (!payload || !payload.itens || !payload.fornecedor?.id) {
+      console.warn('[OC ⚠️] Payload incompleto. Cancelando envio.', payload);
+      return null;
+    }
 
     const response = await axios.post(
       'https://erp.tiny.com.br/public-api/v3/ordens-compra',
-      finalPayload,
+      payload,
       {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        validateStatus: () => true, // Captura todos os status HTTP
+        validateStatus: () => true,
       }
     );
 
