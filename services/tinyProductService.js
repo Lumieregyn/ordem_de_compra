@@ -51,7 +51,7 @@ async function listarProdutosTiny() {
   }
 }
 
-// 🔍 Consulta individual de produto com retry automático em 401
+// 🔍 Consulta individual de produto com validação e fallback 401
 async function getProdutoFromTinyV3(produtoId) {
   console.log(`🔍 Buscando produto ID: ${produtoId}`);
 
@@ -65,11 +65,32 @@ async function getProdutoFromTinyV3(produtoId) {
 
   try {
     const resp = await axios.get(url, {
-      headers: { Authorization: `Bearer ${token}` }
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
     });
 
-    console.log(`✅ Produto ID ${produtoId} carregado com sucesso (Status: ${resp.status})`);
-    return resp.data?.retorno?.produto || null;
+    const produto = resp.data?.produto || resp.data?.retorno?.produto;
+
+    if (!produto) {
+      console.warn(`⚠️ Produto não encontrado na resposta. ID: ${produtoId}`);
+      console.dir(resp.data, { depth: null });
+      return null;
+    }
+
+    const { sku, descricao, marca } = produto;
+
+    if (!sku || !descricao || !marca?.nome) {
+      console.warn(`⚠️ Produto incompleto detectado (ID: ${produtoId}). Dados ausentes:`);
+      if (!sku) console.warn('- SKU ausente');
+      if (!descricao) console.warn('- Descrição ausente');
+      if (!marca?.nome) console.warn('- Marca ausente');
+      console.dir(resp.data, { depth: null });
+    }
+
+    console.log(`✅ Produto ID ${produtoId} carregado com sucesso`);
+    return produto;
 
   } catch (err) {
     const status = err.response?.status;
@@ -78,15 +99,23 @@ async function getProdutoFromTinyV3(produtoId) {
     if (status === 401) {
       console.warn(`⚠️ Token expirado. Tentando nova tentativa para produto ID ${produtoId}...`);
 
-      token = await getAccessToken(true); // Força renovação
+      token = await getAccessToken(true); // força renovação
 
       try {
         const retry = await axios.get(url, {
           headers: { Authorization: `Bearer ${token}` }
         });
 
-        console.log(`✅ Produto ID ${produtoId} carregado após renovação (Status: ${retry.status})`);
-        return retry.data?.retorno?.produto || null;
+        const produto = retry.data?.produto || retry.data?.retorno?.produto;
+
+        if (!produto) {
+          console.warn(`⚠️ Produto não encontrado mesmo após renovação. ID: ${produtoId}`);
+          console.dir(retry.data, { depth: null });
+          return null;
+        }
+
+        console.log(`✅ Produto ID ${produtoId} carregado após renovação`);
+        return produto;
 
       } catch (retryErr) {
         console.error(`❌ Falha mesmo após renovar token para produto ID ${produtoId}:`, retryErr.response?.data || retryErr.message);
