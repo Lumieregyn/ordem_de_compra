@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
+const { salvarToken } = require('../services/tokenService'); // ✅ NOVO
 
-// GET /auth → Redireciona para autenticação OAuth2 Tiny
+// GET /auth → inicia fluxo OAuth
 router.get('/', (req, res) => {
   const params = new URLSearchParams({
     response_type: 'code',
@@ -14,7 +15,7 @@ router.get('/', (req, res) => {
   res.redirect(`https://accounts.tiny.com.br/realms/tiny/protocol/openid-connect/auth?${params}`);
 });
 
-// GET /callback → Recebe o código e troca pelo token
+// GET /callback → troca o código pelo token e salva
 router.get('/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send('Código ausente');
@@ -33,17 +34,21 @@ router.get('/callback', async (req, res) => {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
+        validateStatus: () => true,
       }
     );
 
-    const token = response.data?.access_token;
-    if (!token) return res.status(500).send('Token não retornado pela API');
+    const tokenData = response.data;
 
-    // Salva token global (ou no arquivo, banco etc)
-    global.tinyAccessToken = token;
+    if (!tokenData?.access_token) {
+      console.error('❌ Erro: token não retornado:', tokenData);
+      return res.status(500).send('Token não retornado pela Tiny');
+    }
 
-    console.log('✅ Token obtido com sucesso. Expira em', response.data.expires_in, 'segundos.');
+    salvarToken(tokenData); // ✅ Salva com expires_at
+    console.log('✅ Token salvo com sucesso.');
     res.send('✅ Token salvo com sucesso.');
+
   } catch (err) {
     console.error('❌ Erro no callback:', err.response?.data || err.message);
     res.status(500).send('Erro ao salvar token');
