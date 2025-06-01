@@ -5,7 +5,7 @@ const { getProdutoFromTinyV3 } = require('../services/tinyProductService');
 const { getAccessToken } = require('../services/tokenService');
 const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
-const { getPedidoCompletoById } = require('../services/tinyPedidoService'); // ✅ ajuste aqui
+const { getPedidoCompletoByNumero } = require('../services/tinyPedidoService'); // ✅ AJUSTADO AQUI
 const axios = require('axios');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
@@ -62,16 +62,15 @@ router.post('/', async (req, res) => {
 
   try {
     const body = req.body;
-    const idPedido = body?.dados?.id;
     const numeroPedido = body?.dados?.numero;
 
-    if (!idPedido || !numeroPedido) {
-      console.warn('❌ Webhook sem ID ou número de pedido válido');
+    if (!numeroPedido) {
+      console.warn('❌ Webhook sem número de pedido válido');
       return;
     }
 
-    console.log(`📦 Webhook gatilho para pedido ${numeroPedido} (ID ${idPedido}). Buscando dados via API V3...`);
-    const pedido = await getPedidoCompletoById(idPedido); // ✅ agora com ID real
+    console.log(`📦 Webhook gatilho para pedido ${numeroPedido}. Buscando dados via API V3...`);
+    const pedido = await getPedidoCompletoByNumero(numeroPedido); // ✅ AJUSTADO AQUI
 
     if (!pedido || !pedido.itens || !Array.isArray(pedido.itens) || pedido.itens.length === 0) {
       console.warn(`❌ Pedido ${numeroPedido} encontrado, mas sem itens válidos.`);
