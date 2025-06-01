@@ -36,6 +36,13 @@ function gerarPayloadOrdemCompra(dados) {
     throw new Error('Dados obrigatórios ausentes no Bloco 4');
   }
 
+  // 🧮 Garantir tipo numérico válido no produto.id
+  const produtoIdNumerico = parseInt(produto.id);
+  if (isNaN(produtoIdNumerico)) {
+    console.warn(`[Bloco 4 ⚠️] produto.id não é um número válido: ${produto.id}`);
+    throw new Error('produto.id inválido (não numérico)');
+  }
+
   // 📅 Datas
   const dataPedido = pedido.data;
   const diasPreparacao = produto?.diasPreparacao || 5;
@@ -67,7 +74,7 @@ function gerarPayloadOrdemCompra(dados) {
     ],
     itens: [
       {
-        produto: { id: produto.id },
+        produto: { id: produtoIdNumerico },
         quantidade,
         valor: valorUnitario,
         informacoesAdicionais: `SKU: ${sku} / Fornecedor: ${produto?.marca?.nome || '---'}`,
@@ -77,7 +84,7 @@ function gerarPayloadOrdemCompra(dados) {
     ]
   };
 
-  console.log('🔧 Payload OC gerado:', payload);
+  console.log('🔧 Payload OC gerado:', JSON.stringify(payload, null, 2));
   return payload;
 }
 
