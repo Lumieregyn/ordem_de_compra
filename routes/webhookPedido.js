@@ -61,38 +61,27 @@ router.post('/', async (req, res) => {
   res.status(200).send('Webhook recebido ✅');
 
   try {
-    const idPedido = req.body?.dados?.id;
-    const numeroPedido = req.body?.dados?.numero;
+    const body = req.body;
+    const numeroPedido = body?.dados?.numero;
+    const idPedido = body?.dados?.id;
 
-    if (!idPedido || !numeroPedido) {
-      console.warn('❌ Webhook sem ID ou número de pedido válido');
+    if (!numeroPedido || !idPedido) {
+      console.warn('❌ Webhook sem número ou ID de pedido válido');
       return;
     }
 
     console.log(`📦 Webhook gatilho para pedido ${numeroPedido} (ID ${idPedido}). Buscando dados via API V3...`);
+    const pedido = await getPedidoCompletoById(idPedido);
 
-    let pedido = null;
-    const maxTentativas = 5;
-    const delays = [5000, 10000, 15000, 20000, 30000];
+    // 🔍 LOG do pedido e itens antes de processar
+    console.log('📦 Pedido completo carregado:', JSON.stringify(pedido, null, 2));
 
-    for (let i = 0; i < maxTentativas; i++) {
-      try {
-        console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido} (tentativa ${i + 1})`);
-        pedido = await getPedidoCompletoById(idPedido);
-        if (pedido?.itens && pedido.itens.length > 0) break;
-      } catch (err) {
-        console.warn(`⚠️ Tentativa ${i + 1} falhou:`, err.message);
-      }
-
-      if (i < delays.length) {
-        await delay(delays[i]);
-      }
-    }
-
-    if (!pedido || !pedido.itens || pedido.itens.length === 0) {
-      console.error(`❌ Pedido ${numeroPedido} ainda não disponível após ${maxTentativas} tentativas.`);
+    if (!pedido.itens || !Array.isArray(pedido.itens) || pedido.itens.length === 0) {
+      console.warn('⚠️ Pedido sem itens válidos. Interrompendo pipeline.');
       return;
     }
+
+    console.log('🧾 Itens do pedido:', JSON.stringify(pedido.itens, null, 2));
 
     const fornecedores = await listarTodosFornecedores();
     const resultados = [];
@@ -103,6 +92,7 @@ router.post('/', async (req, res) => {
       const valorUnitario = item.valorUnitario || 0;
 
       if (!produtoId) {
+        console.warn('⚠️ Item sem produto associado:', JSON.stringify(item, null, 2));
         resultados.push({ status: 'produto sem ID válido', item });
         continue;
       }
