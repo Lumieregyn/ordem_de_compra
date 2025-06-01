@@ -52,4 +52,27 @@ async function enviarOrdemCompra(payload) {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        v
+        validateStatus: () => true,
+      }
+    );
+
+    const { status, data } = response;
+
+    if (status === 200 && data?.retorno?.status === 'sucesso') {
+      console.log(`[OC ✅] Ordem de Compra criada com sucesso: ID ${data.retorno.ordem_compra.id}`);
+      return data;
+    } else {
+      console.warn('[OC ⚠️] Erro no envio da OC:', {
+        status,
+        mensagem: data?.mensagem,
+        detalhes: data?.detalhes || data?.retorno?.erros || null,
+      });
+      return data;
+    }
+  } catch (err) {
+    console.error('[OC ❌] Erro inesperado ao enviar OC:', err.message);
+    return null;
+  }
+}
+
+module.exports = { enviarOrdemCompra };
