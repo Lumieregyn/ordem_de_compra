@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { getAccessToken } = require('../auth/tokenService');
+const { getAccessToken } = require('./tokenService');
 
 /**
  * Envia uma ordem de compra para a API Tiny v3 (JSON + OAuth2)
