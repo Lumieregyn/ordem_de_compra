@@ -1,11 +1,19 @@
 const axios = require('axios');
 const { getAccessToken } = require('../auth/tokenService');
 
+/**
+ * Envia uma ordem de compra para a API Tiny v3 (JSON + OAuth2)
+ * @param {Object} payload JSON completo da ordem de compra (vindo do Bloco 4)
+ * @returns {Object} resultado padronizado com sucesso ou erro
+ */
 async function enviarOrdemCompraV3(payload) {
   try {
-    // Validação mínima do payload
     if (!payload || typeof payload !== 'object' || !payload.itens?.length) {
-      throw new Error('Payload da Ordem de Compra está incompleto ou inválido.');
+      return {
+        sucesso: false,
+        erro: 'validação',
+        mensagem: 'Payload inválido ou sem itens'
+      };
     }
 
     const token = await getAccessToken();
@@ -18,7 +26,7 @@ async function enviarOrdemCompraV3(payload) {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        validateStatus: () => true, // Captura todos os status HTTP
+        validateStatus: () => true, // Permite tratar status 400+
       }
     );
 
@@ -26,36 +34,36 @@ async function enviarOrdemCompraV3(payload) {
 
     if (status === 200 && data?.retorno?.status === 'sucesso') {
       const ordemCompra = data.retorno.ordem_compra;
-      console.log(`[OC Enviada ✅] Ordem de Compra criada com sucesso (ID: ${ordemCompra.id}, Pedido: ${ordemCompra.numero_pedido})`);
+      console.log(`[OC Enviada ✅] OC criada com ID ${ordemCompra.id}, Pedido ${ordemCompra.numero_pedido}`);
       return {
         sucesso: true,
-        id: ordemCompra.id,
-        numeroPedido: ordemCompra.numero_pedido,
-      };
-    } else {
-      // Tratamento de erro retornado pela Tiny
-      const mensagem = data?.mensagem || 'Erro no envio da OC';
-      const detalhes = data?.detalhes || data?.retorno?.erros || [];
-
-      console.warn(`[OC Erro ⚠️] Falha no envio da OC. Status: ${status} | Mensagem: ${mensagem}`);
-      if (detalhes.length) console.warn('Detalhes do erro:', detalhes);
-
-      // Aqui você pode invocar o Bloco 7, ex: enviarNotificacaoWhatsapp(mensagem)
-      return {
-        sucesso: false,
-        status,
-        mensagem,
-        detalhes,
+        idOrdemCompra: ordemCompra.id,
+        numero: ordemCompra.numero_pedido,
+        mensagem: 'Ordem de Compra criada com sucesso'
       };
     }
-  } catch (erro) {
-    // Erro inesperado (rede, token, estrutura etc.)
-    console.error('[OC Erro ❌] Erro crítico ao enviar OC:', erro.message);
+
+    // Se houver erros da Tiny (validação, campos obrigatórios etc.)
+    const mensagem = data?.mensagem || data?.retorno?.status || 'Erro no envio';
+    const detalhes = data?.detalhes || data?.retorno?.erros || [];
+
+    console.warn(`[OC Erro ⚠️] Falha ao enviar OC. Status ${status} | Mensagem: ${mensagem}`);
+    if (detalhes.length) console.warn('Detalhes do erro:', detalhes);
 
     return {
       sucesso: false,
-      mensagem: 'Erro crítico ao tentar enviar a OC',
-      detalhes: erro.message,
+      erro: 'validacao',
+      mensagem,
+      detalhes
+    };
+
+  } catch (err) {
+    // Falha crítica
+    console.error(`[OC Erro ❌] Erro inesperado:`, err.message);
+    return {
+      sucesso: false,
+      erro: 'falha',
+      mensagem: err.message || 'Erro inesperado ao enviar Ordem de Compra'
     };
   }
 }
