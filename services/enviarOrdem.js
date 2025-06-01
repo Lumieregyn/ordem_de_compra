@@ -47,4 +47,4 @@ async function enviarOrdemCompra(payload) {
   }
 }
 
-module.exports = { enviarOrdemCompraV3 };
+module.exports = { enviarOrdemCompra };
