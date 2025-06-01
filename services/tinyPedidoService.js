@@ -4,27 +4,21 @@ const { getAccessToken } = require('./tokenService');
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 
 /**
- * Busca os dados completos de um pedido Tiny usando o ID real (entregue no webhook).
- * Usa: GET /pedidos/{id}?completo=true
+ * Busca os dados completos de um pedido Tiny usando o ID recebido via webhook.
  * 
- * @param {string|number} idPedido - ID do pedido entregue no webhook
- * @returns {Promise<Object>} - Objeto com dados completos do pedido
+ * @param {string|number} idPedido
+ * @returns {Promise<Object>} Pedido completo
  */
 async function getPedidoCompletoById(idPedido) {
   const token = getAccessToken();
-  if (!token) {
-    throw new Error('Token de acesso à API Tiny não disponível');
-  }
+  if (!token) throw new Error('Token de acesso à API Tiny não disponível');
 
   const url = `${TINY_API_V3_BASE}/pedidos/${idPedido}?completo=true`;
 
   try {
     console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido}...`);
-
     const response = await axios.get(url, {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
+      headers: { Authorization: `Bearer ${token}` }
     });
 
     const pedido = response.data?.pedido;
