@@ -5,7 +5,7 @@ const { getProdutoFromTinyV3 } = require('../services/tinyProductService');
 const { getAccessToken } = require('../services/tokenService');
 const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
-const { getPedidoCompletoById } = require('../services/tinyPedidoService');
+const { getPedidoCompletoById } = require('../services/tinyPedidoService'); // ✅ Nova função importada
 const axios = require('axios');
 
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
@@ -18,7 +18,7 @@ async function delay(ms) {
 function normalizarTexto(txt) {
   return txt
     ?.normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .replace(/[^a-zA-Z0-9]/g, '')
     .toLowerCase()
     .trim();
@@ -61,39 +61,32 @@ router.post('/', async (req, res) => {
   res.status(200).send('Webhook recebido ✅');
 
   try {
-    const body = req.body;
-    const numeroPedido = body?.dados?.numero;
-    const idPedido = body?.dados?.id;
+    const idPedido = req.body?.dados?.id;
+    const numeroPedido = req.body?.dados?.numero;
 
-    if (!numeroPedido || !idPedido) {
-      console.warn('❌ Webhook sem número ou ID de pedido válido');
+    if (!idPedido || !numeroPedido) {
+      console.warn('❌ Webhook sem ID ou número de pedido válido');
       return;
     }
 
     console.log(`📦 Webhook gatilho para pedido ${numeroPedido} (ID ${idPedido}). Buscando dados via API V3...`);
     const pedido = await getPedidoCompletoById(idPedido);
 
-    // 🔍 LOG do pedido e itens antes de processar
-    console.log('📦 Pedido completo carregado:', JSON.stringify(pedido, null, 2));
-
-    if (!pedido.itens || !Array.isArray(pedido.itens) || pedido.itens.length === 0) {
-      console.warn('⚠️ Pedido sem itens válidos. Interrompendo pipeline.');
+    if (!pedido || !pedido.itens || !Array.isArray(pedido.itens) || pedido.itens.length === 0) {
+      console.warn(`❌ Pedido ${numeroPedido} encontrado, mas sem itens válidos.`);
       return;
     }
 
-    console.log('🧾 Itens do pedido:', JSON.stringify(pedido.itens, null, 2));
-
+    console.log('🔁 Iniciando processamento dos itens do pedido...');
     const fornecedores = await listarTodosFornecedores();
     const resultados = [];
 
     for (const item of pedido.itens) {
-      const produtoId = item.produto?.id;
-      const quantidade = item.quantidade || 1;
-      const valorUnitario = item.valorUnitario || 0;
+      console.log('📌 Item atual:', item);
 
+      const produtoId = item.produto?.id;
       if (!produtoId) {
-        console.warn('⚠️ Item sem produto associado:', JSON.stringify(item, null, 2));
-        resultados.push({ status: 'produto sem ID válido', item });
+        console.warn('⚠️ Item sem produto.id válido. Ignorando...');
         continue;
       }
 
@@ -102,19 +95,19 @@ router.post('/', async (req, res) => {
         produto = await getProdutoFromTinyV3(produtoId);
       } catch (err) {
         console.error(`❌ Erro ao buscar produto ID ${produtoId}:`, err.message);
-        resultados.push({ produtoId, status: 'erro ao buscar produto', erro: err.message });
         continue;
       }
 
       if (!produto) {
-        resultados.push({ produtoId, status: 'produto não encontrado (null)' });
+        console.warn(`⚠️ Produto ${produtoId} não retornado pela API.`);
         continue;
       }
 
-      const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
-      console.log('🔎 SKU detectado:', sku);
+      console.log('🔎 Produto carregado:', produto);
 
+      const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
       const marca = produto.marca?.nome?.trim();
+
       if (!marca) {
         resultados.push({ produtoSKU: sku, status: 'marca ausente' });
         continue;
@@ -131,8 +124,8 @@ router.post('/', async (req, res) => {
         console.log('✅ Match direto encontrado:', fornecedorMatchDireto.nome);
         const respostaOC = await enviarOrdemCompra({
           produtoId,
-          quantidade,
-          valorUnitario,
+          quantidade: item.quantidade || 1,
+          valorUnitario: item.valorUnitario || 0,
           idFornecedor: fornecedorMatchDireto.id
         });
 
@@ -155,10 +148,10 @@ router.post('/', async (req, res) => {
 
       let respostaIA;
       try {
-        respostaIA = await analisarPedidoViaIA({ produto, quantidade, valorUnitario, marca }, fornecedoresFiltrados);
+        respostaIA = await analisarPedidoViaIA({ produto, quantidade: item.quantidade, valorUnitario: item.valorUnitario, marca }, fornecedoresFiltrados);
       } catch (err) {
         console.error('❌ Erro na inferência IA:', err.message);
-        return;
+        continue;
       }
 
       const itemIA = respostaIA?.itens?.[0];
@@ -177,9 +170,9 @@ router.post('/', async (req, res) => {
       }
 
       if (itemIA.deveGerarOC) {
-        console.log('📤 Enviando OC com dados:', { produtoId, quantidade, valorUnitario, idFornecedor: itemIA.idFornecedor });
+        console.log('📤 Enviando OC com dados:', { produtoId, quantidade: item.quantidade, valorUnitario: item.valorUnitario, idFornecedor: itemIA.idFornecedor });
 
-        const respostaOC = await enviarOrdemCompra({ produtoId, quantidade, valorUnitario, idFornecedor: itemIA.idFornecedor });
+        const respostaOC = await enviarOrdemCompra({ produtoId, quantidade: item.quantidade, valorUnitario: item.valorUnitario, idFornecedor: itemIA.idFornecedor });
         console.log('📥 Resposta da Tiny:', respostaOC);
 
         resultados.push({
