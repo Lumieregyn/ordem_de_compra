@@ -9,7 +9,6 @@ const { getProdutoFromTinyV3 } = require('./services/tinyProductService');
 
 const listarMarcasRoute = require('./routes/listarMarcas');
 const webhookPedidoRoute = require('./routes/webhookPedido');
-const selecionarFornecedorRoute = require('./routes/selecionarFornecedor'); // ✅ Nova rota adicionada
 const tokenDebugRoute = require('./routes/tokenDebug');
 const authRoutes = require('./routes/auth');
 const tokenInfoRoute = require('./routes/tokenInfo');
@@ -52,7 +51,7 @@ app.get('/testar-marca-ia/:id', async (req, res) => {
 
 app.use('/listar-marcas', listarMarcasRoute);
 app.use('/webhook-pedido', webhookPedidoRoute);
-app.use('/selecionar-fornecedor', selecionarFornecedorRoute); // ✅ Rota final ativa
+// 🔁 app.use('/selecionar-fornecedor', selecionarFornecedorRoute); // REMOVIDO TEMPORARIAMENTE
 
 app.listen(PORT, () => {
   console.log(`🌐 Servidor rodando na porta ${PORT}`);
