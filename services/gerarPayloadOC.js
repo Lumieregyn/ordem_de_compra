@@ -46,16 +46,13 @@ function gerarPayloadOrdemCompra(dados) {
   // 💰 Valor total da parcela
   const valorTotal = Number((quantidade * valorUnitario).toFixed(2));
 
-  // 💳 Parcela sem contaContabil
+  // 💳 Parcela (sem contaContabil)
   const parcela = {
     dias: 30,
     valor: valorTotal,
     meioPagamento: "1",
     observacoes: "Pagamento único"
   };
-
-  // ⚠️ Omitir contaContabil por problemas com ID inválido
-  console.warn('[Bloco 4 ⚠️] contaContabil.id omitido para evitar erro de validação na API Tiny');
 
   // 🧾 Payload final da Ordem de Compra
   const payload = {
