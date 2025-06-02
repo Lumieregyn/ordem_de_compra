@@ -46,7 +46,7 @@ function gerarPayloadOrdemCompra(dados) {
   // 💰 Valor total da parcela
   const valorTotal = Number((quantidade * valorUnitario).toFixed(2));
 
-  // 🔧 Parcela (condicional com contaContabil se válida)
+  // 💳 Parcela sem contaContabil
   const parcela = {
     dias: 30,
     valor: valorTotal,
@@ -54,12 +54,8 @@ function gerarPayloadOrdemCompra(dados) {
     observacoes: "Pagamento único"
   };
 
-  const contaContabilId = 1;
-  if (Number.isInteger(contaContabilId) && contaContabilId > 0) {
-    parcela.contaContabil = { id: contaContabilId };
-  } else {
-    console.warn(`[Bloco 4 ⚠️] contaContabil.id inválido: ${contaContabilId} – campo será omitido`);
-  }
+  // ⚠️ Omitir contaContabil por problemas com ID inválido
+  console.warn('[Bloco 4 ⚠️] contaContabil.id omitido para evitar erro de validação na API Tiny');
 
   // 🧾 Payload final da Ordem de Compra
   const payload = {
