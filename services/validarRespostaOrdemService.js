@@ -15,6 +15,7 @@ function validarRespostaOrdem(data) {
   if (idOrdem) {
     console.log(`✅ OC criada com ID ${idOrdem} (status: '${status}')`);
 
+    // 📌 Log adicional se houver mensagem ou detalhes
     if (mensagem || detalhes) {
       console.log('[OC ℹ️] Mensagem adicional da Tiny:', {
         mensagem,
@@ -27,10 +28,9 @@ function validarRespostaOrdem(data) {
 
   // ❌ Caso sem ID, tratar como erro funcional
   console.error('❌ Falha na criação da OC via API Tiny:', {
-    status,
-    mensagem,
-    detalhes,
-    ordem_compra: data.retorno.ordem_compra,
+    status: data.retorno.status,
+    erros: data.retorno?.erros || 'Sem detalhes de erro',
+    ordem_compra: data.retorno?.ordem_compra,
   });
 
   return false;
