@@ -36,13 +36,6 @@ function gerarPayloadOrdemCompra(dados) {
     throw new Error('Dados obrigatórios ausentes no Bloco 4');
   }
 
-  // 🧮 Garantir tipo numérico válido no produto.id
-  const produtoIdNumerico = parseInt(produto.id);
-  if (isNaN(produtoIdNumerico)) {
-    console.warn(`[Bloco 4 ⚠️] produto.id não é um número válido: ${produto.id}`);
-    throw new Error('produto.id inválido (não numérico)');
-  }
-
   // 📅 Datas
   const dataPedido = pedido.data;
   const diasPreparacao = produto?.diasPreparacao || 5;
@@ -52,6 +45,21 @@ function gerarPayloadOrdemCompra(dados) {
 
   // 💰 Valor total da parcela
   const valorTotal = Number((quantidade * valorUnitario).toFixed(2));
+
+  // 🔧 Parcela (condicional com contaContabil se válida)
+  const parcela = {
+    dias: 30,
+    valor: valorTotal,
+    meioPagamento: "1",
+    observacoes: "Pagamento único"
+  };
+
+  const contaContabilId = 1;
+  if (Number.isInteger(contaContabilId) && contaContabilId > 0) {
+    parcela.contaContabil = { id: contaContabilId };
+  } else {
+    console.warn(`[Bloco 4 ⚠️] contaContabil.id inválido: ${contaContabilId} – campo será omitido`);
+  }
 
   // 🧾 Payload final da Ordem de Compra
   const payload = {
@@ -63,18 +71,10 @@ function gerarPayloadOrdemCompra(dados) {
     observacoesInternas: "OC gerada automaticamente via IA",
     contato: { id: idFornecedor },
     categoria: { id: 0 },
-    parcelas: [
-      {
-        dias: 30,
-        valor: valorTotal,
-        contaContabil: { id: 1 },
-        meioPagamento: "1",
-        observacoes: "Pagamento único"
-      }
-    ],
+    parcelas: [parcela],
     itens: [
       {
-        produto: { id: produtoIdNumerico },
+        produto: { id: parseInt(produto.id) },
         quantidade,
         valor: valorUnitario,
         informacoesAdicionais: `SKU: ${sku} / Fornecedor: ${produto?.marca?.nome || '---'}`,
