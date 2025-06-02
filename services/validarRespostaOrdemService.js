@@ -11,11 +11,11 @@ function validarRespostaOrdem(data) {
   const mensagem = data.retorno.mensagem;
   const detalhes = data.retorno.erros || data.retorno.detalhes;
 
-  // ✅ Considerar sucesso real se ID da OC estiver presente (mesmo com status "erro")
+  // ✅ Considera sucesso se o ID da OC estiver presente, mesmo com status "erro"
   if (idOrdem) {
     console.log(`✅ OC criada com ID ${idOrdem} (status: '${status}')`);
 
-    // 📌 Log adicional se houver mensagem ou detalhes
+    // ℹ️ Log adicional de mensagem ou detalhes
     if (mensagem || detalhes) {
       console.log('[OC ℹ️] Mensagem adicional da Tiny:', {
         mensagem,
@@ -26,7 +26,7 @@ function validarRespostaOrdem(data) {
     return true;
   }
 
-  // ❌ Caso sem ID, tratar como erro funcional
+  // ❌ Nenhum ID retornado = erro real
   console.error('❌ Falha na criação da OC via API Tiny:', {
     status: data.retorno.status,
     erros: data.retorno?.erros || 'Sem detalhes de erro',
