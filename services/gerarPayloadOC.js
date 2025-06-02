@@ -77,6 +77,22 @@ function gerarPayloadOrdemCompra(dados) {
     ]
   };
 
+  // 🚫 Remover objetos inválidos se necessário
+  if (!payload.contato?.id) {
+    console.warn('[Bloco 4 ⚠️] contato.id ausente – removendo campo contato');
+    delete payload.contato;
+  }
+
+  if (!payload.categoria?.id && payload.categoria?.id !== 0) {
+    console.warn('[Bloco 4 ⚠️] categoria.id inválido – removendo campo categoria');
+    delete payload.categoria;
+  }
+
+  if (!payload.itens[0].produto?.id) {
+    console.warn('[Bloco 4 ⚠️] produto.id inválido – removendo campo produto do item');
+    delete payload.itens[0].produto;
+  }
+
   console.log('🔧 Payload OC gerado:', JSON.stringify(payload, null, 2));
   return payload;
 }
