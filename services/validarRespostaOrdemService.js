@@ -15,7 +15,7 @@ function validarRespostaOrdem(data) {
   if (idOrdem) {
     console.log(`✅ OC criada com ID ${idOrdem} (status: '${status}')`);
 
-    // ℹ️ Log adicional de mensagem ou detalhes
+    // 📝 Log adicional de mensagem ou detalhes
     if (mensagem || detalhes) {
       console.log('[OC ℹ️] Mensagem adicional da Tiny:', {
         mensagem,
