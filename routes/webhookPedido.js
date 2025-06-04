@@ -9,14 +9,17 @@ const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
 const { getPedidoCompletoById } = require('../services/tinyPedidoService');
 const axios = require('axios');
 
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const pedidosProcessados = new Set();
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 const MAX_PAGINAS = 10;
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const pedidosProcessados = new Set();
-
 function normalizarTexto(txt) {
   return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
+}
+
+function filtrarItensNecessarios(itens) {
+  return itens.filter(item => item.produto?.sku?.toUpperCase().includes('PEDIDO'));
 }
 
 async function listarTodosFornecedores() {
@@ -48,11 +51,6 @@ async function listarTodosFornecedores() {
   }
 }
 
-// 🔎 Função auxiliar: filtrar itens com SKU contendo "PEDIDO"
-function filtrarItensNecessarios(itens) {
-  return itens.filter(item => item.produto?.sku?.toUpperCase().includes('PEDIDO'));
-}
-
 router.post('/', async (req, res) => {
   res.status(200).send('Webhook recebido ✅');
 
@@ -79,25 +77,26 @@ router.post('/', async (req, res) => {
       return;
     }
 
-    console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido}...`);
     const pedido = await getPedidoCompletoById(idPedido);
-
     if (!pedido || !pedido.id || !pedido.numeroPedido) {
       console.warn(`⚠️ Dados incompletos do pedido retornado. ID: ${idPedido}`);
       return;
     }
 
-    if (!pedido.itens || !Array.isArray(pedido.itens) || pedido.itens.length === 0) {
-      console.warn(`⚠️ Pedido ${numeroPedido} retornado sem itens. Ignorando.`);
-      return;
+    // ✅ VERIFICA STATUS
+    if (pedido.status?.toUpperCase() !== 'APROVADO') {
+      console.log(`🛑 Pedido ${pedido.numeroPedido} ignorado. Status atual: ${pedido.status}`);
+      return res.status(200).json({
+        mensagem: `Pedido ${pedido.numeroPedido} com status "${pedido.status}" não será processado para OC.`
+      });
     }
 
-    // 🎯 Verificar se há itens com SKU sob encomenda
+    // ✅ VALIDA ITENS
     const itensFiltrados = filtrarItensNecessarios(pedido.itens);
     if (itensFiltrados.length === 0) {
-      console.log(`🛑 Pedido ${pedido.numeroPedido} não contém nenhum item sob encomenda (SKU com "PEDIDO"). OC não será gerada.`);
+      console.log(`🛑 Pedido ${pedido.numeroPedido} não contém itens sob encomenda (com "PEDIDO" no SKU).`);
       return res.status(200).json({
-        mensagem: 'Nenhuma Ordem de Compra necessária para este pedido. Todos os itens são de estoque.'
+        mensagem: 'Todos os itens são de estoque. Nenhuma OC será gerada.'
       });
     }
 
@@ -116,7 +115,7 @@ router.post('/', async (req, res) => {
 
       const produto = await getProdutoFromTinyV3(produtoId);
       if (!produto) {
-        console.warn(`⚠️ Produto ID ${produtoId} não encontrado. Ignorando item.`);
+        console.warn(`⚠️ Produto ID ${produtoId} não encontrado. Ignorando.`);
         continue;
       }
 
@@ -128,26 +127,15 @@ router.post('/', async (req, res) => {
       }
 
       const marcaNormalizada = normalizarTexto(marca);
-      const nomePadrao = `FORNECEDOR ${marcaNormalizada}`;
       let fornecedorSelecionado = fornecedores.find(f =>
-        normalizarTexto(f.nome) === nomePadrao
+        normalizarTexto(f.nome) === `fornecedor ${marcaNormalizada}`
+      ) || fornecedores.find(f =>
+        normalizarTexto(f.nome).includes(marcaNormalizada)
       );
 
       if (!fornecedorSelecionado) {
-        fornecedorSelecionado = fornecedores.find(f =>
-          normalizarTexto(f.nome).includes(marcaNormalizada) ||
-          marcaNormalizada.includes(normalizarTexto(f.nome).replace('fornecedor', '').trim())
-        );
-      }
-
-      if (!fornecedorSelecionado) {
-        const respostaIA = await analisarPedidoViaIA({
-          produtoSKU: sku,
-          marca,
-          fornecedores
-        });
-
-        if (respostaIA?.deveGerarOC && typeof respostaIA?.idFornecedor === 'number') {
+        const respostaIA = await analisarPedidoViaIA({ produtoSKU: sku, marca, fornecedores });
+        if (respostaIA?.deveGerarOC && respostaIA?.idFornecedor) {
           fornecedorSelecionado = fornecedores.find(f => f.id === respostaIA.idFornecedor);
         } else {
           console.warn(`⚠️ IA não encontrou fornecedor para SKU ${sku}`);
@@ -171,7 +159,7 @@ router.post('/', async (req, res) => {
         .map(([k]) => k);
 
       if (camposFaltando.length) {
-        console.warn(`❌ Pedido ${numeroPedido} – Campos obrigatórios ausentes para SKU ${sku}:`, camposFaltando);
+        console.warn(`❌ Pedido ${numeroPedido} – Campos ausentes para SKU ${sku}:`, camposFaltando);
         continue;
       }
 
@@ -185,7 +173,7 @@ router.post('/', async (req, res) => {
       });
 
       if (!payloadOC || typeof payloadOC !== 'object' || !payloadOC.itens?.length) {
-        console.warn(`❌ Payload da OC inválido ou incompleto para SKU ${sku}.`);
+        console.warn(`❌ Payload da OC inválido para SKU ${sku}.`);
         continue;
       }
 
@@ -193,7 +181,7 @@ router.post('/', async (req, res) => {
       resultados.push({ sku, fornecedor: fornecedorSelecionado.nome, status: resposta });
     }
 
-    console.log(`📦 Resultado final do processamento:\n`, resultados);
+    console.log(`📦 Resultado final:\n`, resultados);
   } catch (err) {
     console.error('❌ Erro geral no webhook:', err.message || err);
   }
