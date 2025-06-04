@@ -77,7 +77,6 @@ router.post('/', async (req, res) => {
       console.warn(`⏩ Pedido ID ${idPedido} já processado anteriormente. Ignorando duplicado.`);
       return res.status(200).json({ mensagem: 'Pedido já processado anteriormente.' });
     }
-    pedidosProcessados.add(idPedido);
 
     const token = await getAccessToken();
     if (!token) {
@@ -99,6 +98,9 @@ router.post('/', async (req, res) => {
         mensagem: `Pedido ${numeroPedido} com situação "${pedido.situacao}" não será processado.`
       });
     }
+
+    // ✅ SOMENTE MARCA COMO PROCESSADO AGORA
+    pedidosProcessados.add(idPedido);
 
     const itensFiltrados = filtrarItensNecessarios(pedido.itens);
     if (itensFiltrados.length === 0) {
