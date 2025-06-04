@@ -16,7 +16,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const pedidosProcessados = new Set();
 
 function normalizarTexto(txt) {
-  return txt?.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
+  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
 }
 
 async function listarTodosFornecedores() {
@@ -46,6 +46,11 @@ async function listarTodosFornecedores() {
     console.error('❌ Erro ao buscar fornecedores:', err.message);
     return [];
   }
+}
+
+// 🔎 Função auxiliar: filtrar itens com SKU contendo "PEDIDO"
+function filtrarItensNecessarios(itens) {
+  return itens.filter(item => item.produto?.sku?.toUpperCase().includes('PEDIDO'));
 }
 
 router.post('/', async (req, res) => {
@@ -87,10 +92,19 @@ router.post('/', async (req, res) => {
       return;
     }
 
+    // 🎯 Verificar se há itens com SKU sob encomenda
+    const itensFiltrados = filtrarItensNecessarios(pedido.itens);
+    if (itensFiltrados.length === 0) {
+      console.log(`🛑 Pedido ${pedido.numeroPedido} não contém nenhum item sob encomenda (SKU com "PEDIDO"). OC não será gerada.`);
+      return res.status(200).json({
+        mensagem: 'Nenhuma Ordem de Compra necessária para este pedido. Todos os itens são de estoque.'
+      });
+    }
+
     const fornecedores = await listarTodosFornecedores();
     const resultados = [];
 
-    for (const item of pedido.itens) {
+    for (const item of itensFiltrados) {
       const produtoId = item.produto?.id;
       const quantidade = item.quantidade || 1;
       const valorUnitario = item.valorUnitario || item.valor_unitario || 0;
