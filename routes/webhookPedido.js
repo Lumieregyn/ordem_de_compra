@@ -22,6 +22,16 @@ function filtrarItensNecessarios(itens) {
   return itens.filter(item => item.produto?.sku?.toUpperCase().includes('PEDIDO'));
 }
 
+function agruparItensPorMarca(itensComMarca) {
+  const grupos = {};
+  for (const item of itensComMarca) {
+    const marca = item.marca || 'DESCONHECIDA';
+    if (!grupos[marca]) grupos[marca] = [];
+    grupos[marca].push(item);
+  }
+  return grupos;
+}
+
 async function listarTodosFornecedores() {
   const token = await getAccessToken();
   if (!token) return [];
@@ -52,8 +62,6 @@ async function listarTodosFornecedores() {
 }
 
 router.post('/', async (req, res) => {
-  res.status(200).send('Webhook recebido ✅');
-
   try {
     const idPedido = req.body?.dados?.id;
     const numeroPedido = req.body?.dados?.numero;
@@ -62,128 +70,103 @@ router.post('/', async (req, res) => {
 
     if (!idPedido || !numeroPedido) {
       console.warn('❌ Webhook sem ID ou número de pedido válido');
-      return;
+      return res.status(200).json({ mensagem: 'Webhook ignorado: dados incompletos.' });
     }
 
     if (pedidosProcessados.has(idPedido)) {
       console.warn(`⏩ Pedido ID ${idPedido} já processado anteriormente. Ignorando duplicado.`);
-      return;
+      return res.status(200).json({ mensagem: 'Pedido já processado anteriormente.' });
     }
     pedidosProcessados.add(idPedido);
 
     const token = await getAccessToken();
     if (!token) {
       console.error('❌ Token de acesso não disponível. Abandonando fluxo.');
-      return;
+      return res.status(500).json({ erro: 'Token indisponível.' });
     }
 
     const pedido = await getPedidoCompletoById(idPedido);
-    if (!pedido || !pedido.id || !pedido.numeroPedido) {
-      console.warn(`⚠️ Dados incompletos do pedido retornado. ID: ${idPedido}`);
-      return;
+    if (!pedido || !pedido.id || !pedido.numeroPedido || !pedido.status) {
+      console.warn(`⚠️ Pedido ${numeroPedido} carregado sem campos essenciais.`);
+      return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
     }
 
-    // ✅ VERIFICA STATUS
-    if (pedido.status?.toUpperCase() !== 'APROVADO') {
+    if (pedido.status.toUpperCase() !== 'APROVADO') {
       console.log(`🛑 Pedido ${pedido.numeroPedido} ignorado. Status atual: ${pedido.status}`);
       return res.status(200).json({
-        mensagem: `Pedido ${pedido.numeroPedido} com status "${pedido.status}" não será processado para OC.`
+        mensagem: `Pedido ${pedido.numeroPedido} com status "${pedido.status}" não será processado.`
       });
     }
 
-    // ✅ VALIDA ITENS
     const itensFiltrados = filtrarItensNecessarios(pedido.itens);
     if (itensFiltrados.length === 0) {
-      console.log(`🛑 Pedido ${pedido.numeroPedido} não contém itens sob encomenda (com "PEDIDO" no SKU).`);
-      return res.status(200).json({
-        mensagem: 'Todos os itens são de estoque. Nenhuma OC será gerada.'
-      });
+      console.log(`🛑 Pedido ${pedido.numeroPedido} sem itens sob encomenda (SKU com "PEDIDO")`);
+      return res.status(200).json({ mensagem: 'Nenhuma OC será gerada. Itens são de estoque.' });
     }
 
     const fornecedores = await listarTodosFornecedores();
-    const resultados = [];
+    const itensEnriquecidos = [];
 
     for (const item of itensFiltrados) {
       const produtoId = item.produto?.id;
       const quantidade = item.quantidade || 1;
       const valorUnitario = item.valorUnitario || item.valor_unitario || 0;
 
-      if (!produtoId) {
-        console.warn(`⚠️ Item sem produtoId. Ignorando.`);
-        continue;
-      }
+      if (!produtoId) continue;
 
       const produto = await getProdutoFromTinyV3(produtoId);
-      if (!produto) {
-        console.warn(`⚠️ Produto ID ${produtoId} não encontrado. Ignorando.`);
-        continue;
-      }
+      if (!produto) continue;
 
       const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
       const marca = produto.marca?.nome?.trim();
-      if (!marca) {
-        console.warn(`⚠️ Produto SKU ${sku} sem marca. Ignorando.`);
-        continue;
-      }
+      if (!marca) continue;
 
-      const marcaNormalizada = normalizarTexto(marca);
-      let fornecedorSelecionado = fornecedores.find(f =>
-        normalizarTexto(f.nome) === `fornecedor ${marcaNormalizada}`
-      ) || fornecedores.find(f =>
-        normalizarTexto(f.nome).includes(marcaNormalizada)
-      );
+      itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
+    }
 
-      if (!fornecedorSelecionado) {
-        const respostaIA = await analisarPedidoViaIA({ produtoSKU: sku, marca, fornecedores });
-        if (respostaIA?.deveGerarOC && respostaIA?.idFornecedor) {
-          fornecedorSelecionado = fornecedores.find(f => f.id === respostaIA.idFornecedor);
-        } else {
-          console.warn(`⚠️ IA não encontrou fornecedor para SKU ${sku}`);
-          continue;
+    const agrupadosPorMarca = agruparItensPorMarca(itensEnriquecidos);
+    const resultados = [];
+
+    for (const [marca, itensDaMarca] of Object.entries(agrupadosPorMarca)) {
+      const marcaNorm = normalizarTexto(marca);
+      let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
+        || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
+
+      if (!fornecedor) {
+        const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
+        if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
+          fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
         }
       }
 
-      const camposObrigatorios = {
-        produtoId: produto.id,
-        quantidade,
-        valorUnitario,
-        sku,
-        idFornecedor: fornecedorSelecionado?.id,
-        nomeFornecedor: fornecedorSelecionado?.nome,
-        pedido,
-        produto
-      };
-
-      const camposFaltando = Object.entries(camposObrigatorios)
-        .filter(([_, v]) => !v)
-        .map(([k]) => k);
-
-      if (camposFaltando.length) {
-        console.warn(`❌ Pedido ${numeroPedido} – Campos ausentes para SKU ${sku}:`, camposFaltando);
+      if (!fornecedor) {
+        console.warn(`⚠️ Nenhum fornecedor identificado para marca ${marca}.`);
         continue;
       }
 
       const payloadOC = gerarPayloadOrdemCompra({
-        pedido,
-        produto,
-        sku,
-        quantidade,
-        valorUnitario,
-        idFornecedor: fornecedorSelecionado.id
+        numeroPedido: pedido.numeroPedido,
+        nomeCliente: pedido.cliente?.nome || '',
+        dataPrevista: pedido.dataPrevista,
+        itens: itensDaMarca,
+        fornecedor
       });
 
-      if (!payloadOC || typeof payloadOC !== 'object' || !payloadOC.itens?.length) {
-        console.warn(`❌ Payload da OC inválido para SKU ${sku}.`);
+      if (!payloadOC || !payloadOC.itens?.length) {
+        console.warn(`❌ Payload inválido para OC da marca ${marca}.`);
         continue;
       }
 
       const resposta = await enviarOrdemCompra(payloadOC);
-      resultados.push({ sku, fornecedor: fornecedorSelecionado.nome, status: resposta });
+      resultados.push({ marca, fornecedor: fornecedor.nome, status: resposta });
     }
 
     console.log(`📦 Resultado final:\n`, resultados);
+    return res.status(200).json({ mensagem: 'OC(s) processada(s)', resultados });
+
   } catch (err) {
     console.error('❌ Erro geral no webhook:', err.message || err);
+    return res.status(500).json({ erro: 'Erro interno no processamento do webhook.' });
   }
 });
 
