@@ -48,13 +48,20 @@ function gerarPayloadOrdemCompra(dados) {
     observacoes: "Pagamento único"
   };
 
-  // 🧾 Payload final da OC agrupada por marca
+  // 🧾 Observações personalizadas conforme Bloco 5
+  const observacoes = [
+    'OC gerada automaticamente via IA',
+    `Pedido de Venda: ${numeroPedido}`,
+    `Cliente: ${nomeCliente}`
+  ].join('\n');
+
+  // 📦 Payload final
   const payload = {
     data: new Date().toISOString().split('T')[0],
     dataPrevista,
     condicao: "A prazo 30 dias",
     fretePorConta: "Destinatário",
-    observacoes: "Gerado automaticamente via integração LumièreGPT",
+    observacoes, // ✅ campo atualizado
     observacoesInternas: `OC gerada automaticamente para fornecedor ${fornecedor.nome} / Pedido ${numeroPedido}`,
     contato: { id: fornecedor.id },
     categoria: { id: 0 },
