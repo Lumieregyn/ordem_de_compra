@@ -84,8 +84,7 @@ router.post('/', async (req, res) => {
       return res.status(500).json({ erro: 'Token indisponível.' });
     }
 
-    const resposta = await getPedidoCompletoById(idPedido);
-    const pedido = resposta?.pedido;
+    const pedido = await getPedidoCompletoById(idPedido);
     const numeroPedido = pedido?.numero || '[sem número]';
 
     if (!pedido || !pedido.id || !pedido.numero || !pedido.situacao) {
