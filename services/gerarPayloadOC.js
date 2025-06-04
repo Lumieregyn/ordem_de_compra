@@ -1,100 +1,66 @@
-const { addBusinessDays } = require('date-fns');
-
 /**
- * Gera o payload da Ordem de Compra no padrão da API Tiny v3.
- * @param {Object} dados - Dados completos do pedido e item processado
+ * Gera o payload da Ordem de Compra no padrão Tiny v3 para um grupo de itens por marca.
+ * @param {Object} dados - Contém: numeroPedido, nomeCliente, dataPrevista, itens[], fornecedor
  * @returns {Object} payload JSON final
  */
 function gerarPayloadOrdemCompra(dados) {
   const {
-    pedido,
-    produto,
-    sku,
-    quantidade,
-    valorUnitario,
-    idFornecedor
+    numeroPedido,
+    nomeCliente,
+    dataPrevista,
+    itens,
+    fornecedor
   } = dados;
 
-  // 🔎 Validação dos campos essenciais
-  const camposObrigatorios = {
-    'pedido': pedido,
-    'produto': produto,
-    'produto.id': produto?.id,
-    'sku': sku,
-    'quantidade': quantidade,
-    'valorUnitario': valorUnitario,
-    'idFornecedor': idFornecedor
-  };
-
-  const camposFaltando = Object.entries(camposObrigatorios)
-    .filter(([_, valor]) => valor === undefined || valor === null);
-
-  if (camposFaltando.length > 0) {
-    camposFaltando.forEach(([campo]) =>
-      console.warn(`[Bloco 4 ⚠️] Campo ausente: ${campo}`)
-    );
-    throw new Error('Dados obrigatórios ausentes no Bloco 4');
+  // ⚠️ Validação da estrutura mínima
+  if (!numeroPedido || !dataPrevista || !Array.isArray(itens) || itens.length === 0 || !fornecedor?.id) {
+    console.warn('[Bloco 4 ⚠️] Dados incompletos para geração da OC');
+    throw new Error('Bloco 4: dados incompletos');
   }
 
-  // 📅 Datas
-  const dataPedido = pedido.data;
-  const dataPrevista = pedido.dataPrevista
-    ? pedido.dataPrevista
-    : addBusinessDays(new Date(dataPedido), 7).toISOString().split('T')[0];
+  // 🎯 Validar e montar os itens
+  const itensValidos = itens
+    .filter(item => item?.produto?.id && item?.quantidade && item?.valorUnitario)
+    .map(item => ({
+      produto: { id: parseInt(item.produto.id) },
+      quantidade: item.quantidade,
+      valor: item.valorUnitario,
+      informacoesAdicionais: `SKU: ${item.sku || '---'} / Fornecedor: ${fornecedor.nome}`,
+      aliquotaIPI: 0,
+      valorICMS: 0
+    }));
 
-  // 💰 Valor total da parcela
-  const valorTotal = Number((quantidade * valorUnitario).toFixed(2));
+  if (itensValidos.length === 0) {
+    console.warn('[Bloco 4 ⚠️] Nenhum item válido para gerar OC.');
+    throw new Error('Bloco 4: Nenhum item válido no grupo');
+  }
 
-  // 💳 Parcela (sem contaContabil)
+  // 💰 Total para a parcela única
+  const valorTotal = itensValidos.reduce(
+    (total, item) => total + (item.quantidade * item.valor),
+    0
+  ).toFixed(2);
+
   const parcela = {
     dias: 30,
-    valor: valorTotal,
+    valor: Number(valorTotal),
     meioPagamento: "1",
     observacoes: "Pagamento único"
   };
 
-  // 🧾 Payload final da Ordem de Compra
+  // 🧾 Payload final da OC agrupada por marca
   const payload = {
-    data: dataPedido,
+    data: new Date().toISOString().split('T')[0],
     dataPrevista,
-    condicao: pedido.condicao || "A prazo 30 dias",
-    fretePorConta: pedido.fretePorConta || "Destinatário",
+    condicao: "A prazo 30 dias",
+    fretePorConta: "Destinatário",
     observacoes: "Gerado automaticamente via integração LumièreGPT",
-    observacoesInternas: "OC gerada automaticamente via IA",
-    contato: { id: idFornecedor },
+    observacoesInternas: `OC gerada automaticamente para fornecedor ${fornecedor.nome} / Pedido ${numeroPedido}`,
+    contato: { id: fornecedor.id },
+    categoria: { id: 0 },
     parcelas: [parcela],
-    itens: [
-      {
-        produto: { id: parseInt(produto.id) },
-        quantidade,
-        valor: valorUnitario,
-        informacoesAdicionais: `SKU: ${sku} / Fornecedor: ${produto?.marca?.nome || '---'}`,
-        aliquotaIPI: 0,
-        valorICMS: 0
-      }
-    ]
+    itens: itensValidos
   };
-
-  // ✅ Adiciona categoria apenas se válida
-  if (pedido?.categoria?.id) {
-    payload.categoria = { id: pedido.categoria.id };
-  }
-
-  // 🚫 Remover objetos inválidos se necessário
-  if (!payload.contato?.id) {
-    console.warn('[Bloco 4 ⚠️] contato.id ausente – removendo campo contato');
-    delete payload.contato;
-  }
-
-  if (!payload.categoria?.id && payload.categoria?.id !== 0) {
-    console.warn('[Bloco 4 ⚠️] categoria.id inválido – removendo campo categoria');
-    delete payload.categoria;
-  }
-
-  if (!payload.itens[0].produto?.id) {
-    console.warn('[Bloco 4 ⚠️] produto.id inválido – removendo campo produto do item');
-    delete payload.itens[0].produto;
-  }
 
   console.log('🔧 Payload OC gerado:', JSON.stringify(payload, null, 2));
   return payload;
