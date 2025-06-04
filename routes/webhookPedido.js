@@ -85,21 +85,20 @@ router.post('/', async (req, res) => {
     }
 
     const pedido = await getPedidoCompletoById(idPedido);
-    const numeroPedido = pedido?.numero || '[sem número]';
+    const numeroPedido = pedido?.numeroPedido || '[sem número]';
 
-    if (!pedido || !pedido.id || !pedido.numero || !pedido.situacao) {
+    if (!pedido || !pedido.id || !pedido.numeroPedido || pedido.situacao === undefined) {
       console.warn(`⚠️ Pedido ${numeroPedido} carregado sem campos essenciais.`);
       return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
     }
 
-    if (pedido.situacao.toUpperCase() !== 'APROVADO') {
+    if (pedido.situacao !== 3) {
       console.log(`🛑 Pedido ${numeroPedido} ignorado. Situação atual: ${pedido.situacao}`);
       return res.status(200).json({
-        mensagem: `Pedido ${numeroPedido} com situação "${pedido.situacao}" não será processado.`
+        mensagem: `Pedido ${numeroPedido} com situação ${pedido.situacao} não será processado.`
       });
     }
 
-    // ✅ Marca como processado SOMENTE após o status validado
     pedidosProcessados.add(idPedido);
 
     const itensFiltrados = filtrarItensNecessarios(pedido.itens);
@@ -149,7 +148,7 @@ router.post('/', async (req, res) => {
       }
 
       const payloadOC = gerarPayloadOrdemCompra({
-        numeroPedido: pedido.numero,
+        numeroPedido: pedido.numeroPedido,
         nomeCliente: pedido.cliente?.nome || '',
         dataPrevista: pedido.dataPrevista,
         itens: itensDaMarca,
