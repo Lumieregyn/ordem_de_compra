@@ -64,11 +64,11 @@ async function listarTodosFornecedores() {
 router.post('/', async (req, res) => {
   try {
     const idPedido = req.body?.dados?.id;
-    const numeroPedido = req.body?.dados?.numero;
+    const numeroRecebido = req.body?.dados?.numero;
 
-    console.log(`📥 Webhook recebido: ID ${idPedido}, Número ${numeroPedido}`);
+    console.log(`📥 Webhook recebido: ID ${idPedido}, Número ${numeroRecebido}`);
 
-    if (!idPedido || !numeroPedido) {
+    if (!idPedido || !numeroRecebido) {
       console.warn('❌ Webhook sem ID ou número de pedido válido');
       return res.status(200).json({ mensagem: 'Webhook ignorado: dados incompletos.' });
     }
@@ -86,21 +86,23 @@ router.post('/', async (req, res) => {
     }
 
     const pedido = await getPedidoCompletoById(idPedido);
-    if (!pedido || !pedido.id || !pedido.numeroPedido || !pedido.status) {
+    const numeroPedido = pedido?.numero || '[sem número]';
+
+    if (!pedido || !pedido.id || !pedido.numero || !pedido.situacao) {
       console.warn(`⚠️ Pedido ${numeroPedido} carregado sem campos essenciais.`);
       return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
     }
 
-    if (pedido.status.toUpperCase() !== 'APROVADO') {
-      console.log(`🛑 Pedido ${pedido.numeroPedido} ignorado. Status atual: ${pedido.status}`);
+    if (pedido.situacao.toUpperCase() !== 'APROVADO') {
+      console.log(`🛑 Pedido ${numeroPedido} ignorado. Situação atual: ${pedido.situacao}`);
       return res.status(200).json({
-        mensagem: `Pedido ${pedido.numeroPedido} com status "${pedido.status}" não será processado.`
+        mensagem: `Pedido ${numeroPedido} com situação "${pedido.situacao}" não será processado.`
       });
     }
 
     const itensFiltrados = filtrarItensNecessarios(pedido.itens);
     if (itensFiltrados.length === 0) {
-      console.log(`🛑 Pedido ${pedido.numeroPedido} sem itens sob encomenda (SKU com "PEDIDO")`);
+      console.log(`🛑 Pedido ${numeroPedido} sem itens sob encomenda (SKU com "PEDIDO")`);
       return res.status(200).json({ mensagem: 'Nenhuma OC será gerada. Itens são de estoque.' });
     }
 
@@ -145,7 +147,7 @@ router.post('/', async (req, res) => {
       }
 
       const payloadOC = gerarPayloadOrdemCompra({
-        numeroPedido: pedido.numeroPedido,
+        numeroPedido: pedido.numero,
         nomeCliente: pedido.cliente?.nome || '',
         dataPrevista: pedido.dataPrevista,
         itens: itensDaMarca,
