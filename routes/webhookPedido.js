@@ -84,7 +84,8 @@ router.post('/', async (req, res) => {
       return res.status(500).json({ erro: 'Token indisponível.' });
     }
 
-    const pedido = await getPedidoCompletoById(idPedido);
+    const resposta = await getPedidoCompletoById(idPedido);
+    const pedido = resposta?.pedido;
     const numeroPedido = pedido?.numero || '[sem número]';
 
     if (!pedido || !pedido.id || !pedido.numero || !pedido.situacao) {
@@ -99,7 +100,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // ✅ SOMENTE MARCA COMO PROCESSADO AGORA
+    // ✅ Marca como processado SOMENTE após o status validado
     pedidosProcessados.add(idPedido);
 
     const itensFiltrados = filtrarItensNecessarios(pedido.itens);
