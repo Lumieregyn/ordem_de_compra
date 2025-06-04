@@ -38,10 +38,9 @@ function gerarPayloadOrdemCompra(dados) {
 
   // 📅 Datas
   const dataPedido = pedido.data;
-  const diasPreparacao = produto?.diasPreparacao || 5;
-  const dataPrevista = addBusinessDays(new Date(dataPedido), diasPreparacao)
-    .toISOString()
-    .split('T')[0];
+  const dataPrevista = pedido.dataPrevista
+    ? pedido.dataPrevista
+    : addBusinessDays(new Date(dataPedido), 7).toISOString().split('T')[0];
 
   // 💰 Valor total da parcela
   const valorTotal = Number((quantidade * valorUnitario).toFixed(2));
@@ -59,11 +58,10 @@ function gerarPayloadOrdemCompra(dados) {
     data: dataPedido,
     dataPrevista,
     condicao: pedido.condicao || "A prazo 30 dias",
-    fretePorConta: "R",
-    observacoes: pedido.observacoes || "Gerado automaticamente",
+    fretePorConta: pedido.fretePorConta || "Destinatário",
+    observacoes: "Gerado automaticamente via integração LumièreGPT",
     observacoesInternas: "OC gerada automaticamente via IA",
     contato: { id: idFornecedor },
-    categoria: { id: 0 },
     parcelas: [parcela],
     itens: [
       {
@@ -76,6 +74,11 @@ function gerarPayloadOrdemCompra(dados) {
       }
     ]
   };
+
+  // ✅ Adiciona categoria apenas se válida
+  if (pedido?.categoria?.id) {
+    payload.categoria = { id: pedido.categoria.id };
+  }
 
   // 🚫 Remover objetos inválidos se necessário
   if (!payload.contato?.id) {
