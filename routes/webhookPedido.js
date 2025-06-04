@@ -85,6 +85,8 @@ router.post('/', async (req, res) => {
     }
 
     const pedido = await getPedidoCompletoById(idPedido);
+    console.log('📦 DEBUG - Pedido completo recebido da Tiny:', JSON.stringify(pedido, null, 2));
+
     const numeroPedido = pedido?.numeroPedido || '[sem número]';
 
     if (!pedido || !pedido.id || !pedido.numeroPedido || pedido.situacao === undefined) {
@@ -111,64 +113,76 @@ router.post('/', async (req, res) => {
     const itensEnriquecidos = [];
 
     for (const item of itensFiltrados) {
-      const produtoId = item.produto?.id;
-      const quantidade = item.quantidade || 1;
-      const valorUnitario = item.valorUnitario || item.valor_unitario || 0;
+      try {
+        const produtoId = item.produto?.id;
+        const quantidade = item.quantidade || 1;
+        const valorUnitario = item.valorUnitario || item.valor_unitario || 0;
 
-      if (!produtoId) continue;
+        if (!produtoId) continue;
 
-      const produto = await getProdutoFromTinyV3(produtoId);
-      if (!produto) continue;
+        console.log(`🔍 Buscando produto ${produtoId}`);
+        const produto = await getProdutoFromTinyV3(produtoId);
+        if (!produto) continue;
 
-      const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
-      const marca = produto.marca?.nome?.trim();
-      if (!marca) continue;
+        const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
+        const marca = produto.marca?.nome?.trim();
+        if (!marca) continue;
 
-      itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
+        itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
+      } catch (erroProduto) {
+        console.error(`❌ Erro ao buscar produto do item:`, erroProduto);
+      }
     }
 
     const agrupadosPorMarca = agruparItensPorMarca(itensEnriquecidos);
     const resultados = [];
 
     for (const [marca, itensDaMarca] of Object.entries(agrupadosPorMarca)) {
-      const marcaNorm = normalizarTexto(marca);
-      let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
-        || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
+      try {
+        const marcaNorm = normalizarTexto(marca);
+        let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
+          || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
 
-      if (!fornecedor) {
-        const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
-        if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
-          fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
+        if (!fornecedor) {
+          const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
+          if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
+            fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
+          }
         }
+
+        if (!fornecedor) {
+          console.warn(`⚠️ Nenhum fornecedor identificado para marca ${marca}.`);
+          continue;
+        }
+
+        console.log(`🧾 Gerando payload para marca ${marca}`);
+        const payloadOC = gerarPayloadOrdemCompra({
+          numeroPedido: pedido.numeroPedido,
+          nomeCliente: pedido.cliente?.nome || '',
+          dataPrevista: pedido.dataPrevista,
+          itens: itensDaMarca,
+          fornecedor
+        });
+
+        if (!payloadOC || !payloadOC.itens?.length) {
+          console.warn(`❌ Payload inválido para OC da marca ${marca}.`);
+          continue;
+        }
+
+        console.log(`🚚 Enviando OC para fornecedor ${fornecedor.nome}`);
+        const resposta = await enviarOrdemCompra(payloadOC);
+        resultados.push({ marca, fornecedor: fornecedor.nome, status: resposta });
+
+      } catch (erroItem) {
+        console.error(`❌ Erro ao processar grupo da marca ${marca}:`, erroItem);
       }
-
-      if (!fornecedor) {
-        console.warn(`⚠️ Nenhum fornecedor identificado para marca ${marca}.`);
-        continue;
-      }
-
-      const payloadOC = gerarPayloadOrdemCompra({
-        numeroPedido: pedido.numeroPedido,
-        nomeCliente: pedido.cliente?.nome || '',
-        dataPrevista: pedido.dataPrevista,
-        itens: itensDaMarca,
-        fornecedor
-      });
-
-      if (!payloadOC || !payloadOC.itens?.length) {
-        console.warn(`❌ Payload inválido para OC da marca ${marca}.`);
-        continue;
-      }
-
-      const resposta = await enviarOrdemCompra(payloadOC);
-      resultados.push({ marca, fornecedor: fornecedor.nome, status: resposta });
     }
 
     console.log(`📦 Resultado final:\n`, resultados);
     return res.status(200).json({ mensagem: 'OC(s) processada(s)', resultados });
 
   } catch (err) {
-    console.error('❌ Erro geral no webhook:', err.message || err);
+    console.error('❌ Erro geral no webhook:', err); // <- LOG COMPLETO DO ERRO
     return res.status(500).json({ erro: 'Erro interno no processamento do webhook.' });
   }
 });
