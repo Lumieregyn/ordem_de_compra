@@ -2,9 +2,11 @@ const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
 const { validarRespostaOrdem } = require('./validarRespostaOrdemService');
 
+const MAX_RETRIES = 3;
+const DELAY_BASE_MS = 1500;
+
 /**
- * Envia uma Ordem de Compra para a API Tiny v3.
- * Valida campos obrigatórios antes do envio.
+ * Envia uma Ordem de Compra para a API Tiny v3 com retry progressivo.
  * @param {Object} payload - JSON completo da ordem de compra
  * @returns {Object|null} - Resposta da Tiny ou null em erro crítico
  */
@@ -30,7 +32,6 @@ async function enviarOrdemCompra(payload) {
     }
   }
 
-  // 🚫 Retorna erro se houver problemas detectados
   if (problemas.length > 0) {
     console.warn('[OC ⚠️] Payload incompleto no Bloco 5:', {
       problemas,
@@ -44,45 +45,63 @@ async function enviarOrdemCompra(payload) {
     };
   }
 
-  // 🚀 Envio real para a API Tiny
-  try {
-    const token = await getAccessToken();
+  // 🚀 Envio com retry progressivo
+  let tentativa = 0;
 
-    const response = await axios.post(
-      // ✅ Endpoint corrigido (sem "s")
-      'https://api.tiny.com.br/public-api/v3/ordem-compra',
-      payload,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        validateStatus: () => true,
+  while (tentativa < MAX_RETRIES) {
+    tentativa++;
+    try {
+      const token = await getAccessToken();
+
+      const response = await axios.post(
+        'https://api.tiny.com.br/public-api/v3/ordem-compra',
+        payload,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 10000,
+          validateStatus: () => true,
+        }
+      );
+
+      const { status, data } = response;
+
+      // 💡 Resposta inesperada mas não erro de rede
+      if (status === 429 || status >= 500) {
+        console.warn(`[OC 🔁] Tentativa ${tentativa} falhou (Status ${status}) - aguardando retry...`);
+        await new Promise((res) => setTimeout(res, tentativa * DELAY_BASE_MS));
+        continue;
       }
-    );
 
-    const { status, data } = response;
+      const sucesso = validarRespostaOrdem(data);
 
-    // ✅ Verifica se a resposta indica sucesso real
-    const sucesso = validarRespostaOrdem(data);
+      if (status === 200 && sucesso) {
+        const { id, numero_pedido } = data.retorno.ordem_compra;
+        console.log(`[OC ✅] Ordem de Compra criada com sucesso: ID ${id}, Pedido ${numero_pedido}`);
+      } else {
+        console.warn('[OC ⚠️] Erro no envio da OC:', {
+          status,
+          mensagem: data?.mensagem,
+          detalhes: data?.detalhes || data?.retorno?.erros || [],
+        });
+      }
 
-    if (status === 200 && sucesso) {
-      const { id, numero_pedido } = data.retorno.ordem_compra;
-      console.log(`[OC ✅] Ordem de Compra criada com sucesso: ID ${id}, Pedido ${numero_pedido}`);
-    } else {
-      console.warn('[OC ⚠️] Erro no envio da OC:', {
-        status,
-        mensagem: data?.mensagem,
-        detalhes: data?.detalhes || data?.retorno?.erros || [],
-      });
+      return data;
+
+    } catch (err) {
+      console.error(`[OC ❌] Erro na tentativa ${tentativa}: ${err.message}`);
+      if (tentativa < MAX_RETRIES) {
+        await new Promise((res) => setTimeout(res, tentativa * DELAY_BASE_MS));
+      } else {
+        return null;
+      }
     }
-
-    return data;
-
-  } catch (err) {
-    console.error('[OC ❌] Erro inesperado ao enviar OC:', err.message);
-    return null;
   }
+
+  console.error('[OC ❌] Todas as tentativas de envio falharam.');
+  return null;
 }
 
 module.exports = { enviarOrdemCompra };
