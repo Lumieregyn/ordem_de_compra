@@ -122,13 +122,23 @@ router.post('/', async (req, res) => {
 
         console.log(`🔍 Buscando produto ${produtoId}`);
         const produto = await getProdutoFromTinyV3(produtoId);
-        if (!produto) continue;
+
+        // Retry curto para erro 429
+        if (!produto) {
+          console.warn(`⚠️ Produto ID ${produtoId} retornou nulo. Tentando novamente após 3s...`);
+          await delay(3000);
+          const retryProduto = await getProdutoFromTinyV3(produtoId);
+          if (!retryProduto) continue;
+          produto = retryProduto;
+        }
 
         const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
         const marca = produto.marca?.nome?.trim();
         if (!marca) continue;
 
         itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
+        await delay(300); // espaçamento entre requisições
+
       } catch (erroProduto) {
         console.error(`❌ Erro ao buscar produto do item:`, erroProduto);
       }
@@ -182,7 +192,7 @@ router.post('/', async (req, res) => {
     return res.status(200).json({ mensagem: 'OC(s) processada(s)', resultados });
 
   } catch (err) {
-    console.error('❌ Erro geral no webhook:', err); // <- LOG COMPLETO DO ERRO
+    console.error('❌ Erro geral no webhook:', err);
     return res.status(500).json({ erro: 'Erro interno no processamento do webhook.' });
   }
 });
