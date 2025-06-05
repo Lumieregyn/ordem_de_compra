@@ -12,11 +12,16 @@ function gerarPayloadOrdemCompra(dados) {
     fornecedor
   } = dados;
 
-  // ⚠️ Validação da estrutura mínima
-  if (!numeroPedido || !dataPrevista || !Array.isArray(itens) || itens.length === 0 || !fornecedor?.id) {
+  // ⚠️ Validação básica
+  if (!numeroPedido || !Array.isArray(itens) || itens.length === 0 || !fornecedor?.id) {
     console.warn('[Bloco 4 ⚠️] Dados incompletos para geração da OC');
     throw new Error('Bloco 4: dados incompletos');
   }
+
+  // 🗓️ Fallback para dataPrevista
+  const dataPrevistaFinal = dataPrevista?.trim() !== ''
+    ? dataPrevista
+    : new Date().toISOString().split('T')[0];
 
   // 🎯 Validar e montar os itens
   const itensValidos = itens
@@ -35,7 +40,7 @@ function gerarPayloadOrdemCompra(dados) {
     throw new Error('Bloco 4: Nenhum item válido no grupo');
   }
 
-  // 💰 Total para a parcela única
+  // 💰 Total da parcela
   const valorTotal = itensValidos.reduce(
     (total, item) => total + (item.quantidade * item.valor),
     0
@@ -48,7 +53,7 @@ function gerarPayloadOrdemCompra(dados) {
     observacoes: "Pagamento único"
   };
 
-  // 🧾 Observações personalizadas conforme Bloco 5
+  // 🧾 Observações padronizadas
   const observacoes = [
     'OC gerada automaticamente via IA',
     `Pedido de Venda: ${numeroPedido}`,
@@ -58,10 +63,10 @@ function gerarPayloadOrdemCompra(dados) {
   // 📦 Payload final
   const payload = {
     data: new Date().toISOString().split('T')[0],
-    dataPrevista,
+    dataPrevista: dataPrevistaFinal,
     condicao: "A prazo 30 dias",
     fretePorConta: "Destinatário",
-    observacoes, // ✅ campo atualizado
+    observacoes,
     observacoesInternas: `OC gerada automaticamente para fornecedor ${fornecedor.nome} / Pedido ${numeroPedido}`,
     contato: { id: fornecedor.id },
     categoria: { id: 0 },
