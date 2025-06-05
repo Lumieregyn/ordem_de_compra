@@ -15,30 +15,35 @@ async function getPedidoCompletoById(id) {
       const url = `${TINY_API_V3_BASE}/pedidos/${id}?completo=true`;
       const response = await axios.get(url, {
         headers: { Authorization: `Bearer ${token}` },
-        validateStatus: () => true, // ✅ captura mesmo status ≠ 200
+        timeout: 10000,
+        validateStatus: () => true, // Captura até erros de validação
       });
 
-      const pedido = response.data;
+      const { status, data } = response;
 
-      // 🔍 DEBUG opcional
-      if (typeof pedido !== 'object' || Object.keys(pedido).length === 0) {
-        console.warn(`⚠️ Pedido ID ${id} retornou resposta vazia ou em branco`);
+      if (!data || typeof data !== 'object') {
+        console.warn(`⚠️ Resposta inesperada (status ${status}) para pedido ${id}:`, data);
+        throw new Error('Resposta malformada da API');
       }
 
-      if (!pedido || !pedido.id || !pedido.numeroPedido || !pedido.itens) {
-        throw new Error(`Pedido ID ${id} retornou incompleto ou inválido.`);
+      if (!data.id || !data.numeroPedido || !Array.isArray(data.itens)) {
+        console.warn(`⚠️ Pedido ID ${id} retornou incompleto ou inválido.`, data);
+        throw new Error(`Pedido ${id} incompleto`);
       }
 
-      return pedido;
+      return data;
 
     } catch (err) {
-      const espera = tentativa * 5000; // espera progressiva: 5s, 10s, 15s...
+      const espera = tentativa * 5000;
+      const statusErro = err.response?.status || 'sem status';
+      const msgErro = err.response?.data || err.message;
 
-      console.warn(`⏳ Erro ao buscar pedido ID ${id} | Tentativa ${tentativa} | Status: desconhecido | ${err.message}`);
+      console.warn(`⏳ Erro ao buscar pedido ID ${id} | Tentativa ${tentativa} | Status: ${statusErro} | ${msgErro}`);
+
       if (tentativa < MAX_TENTATIVAS) {
         await new Promise(resolve => setTimeout(resolve, espera));
       } else {
-        console.error(`❌ Falha final ao buscar pedido ${id}: ${err.message}`);
+        console.error(`❌ Falha final ao buscar pedido ${id}:`, msgErro);
         throw err;
       }
     }
@@ -47,6 +52,5 @@ async function getPedidoCompletoById(id) {
 
 module.exports = {
   getPedidoCompletoById,
-  // ... outros exports existentes, ex:
-  // getPedidoCompletoByNumero
+  // ... outros exports existentes
 };
