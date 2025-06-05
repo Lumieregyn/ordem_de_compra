@@ -50,7 +50,10 @@ function gerarPayloadOrdemCompra(dados) {
     dias: 30,
     valor: Number(valorTotal),
     meioPagamento: "1",
-    observacoes: "Pagamento único"
+    observacoes: "Pagamento único",
+    contaContabil: {
+      id: Number(process.env.TINY_CONTA_CONTABIL_ID || 0) // <-- ID configurável via .env
+    }
   };
 
   // 🧾 Observações padronizadas
