@@ -85,13 +85,20 @@ router.post('/', async (req, res) => {
     }
 
     const pedido = await getPedidoCompletoById(idPedido);
-    console.log('📦 DEBUG - Pedido completo recebido da Tiny:', JSON.stringify(pedido, null, 2));
-
     const numeroPedido = pedido?.numeroPedido || '[sem número]';
 
     if (!pedido || !pedido.id || !pedido.numeroPedido || pedido.situacao === undefined) {
       console.warn(`⚠️ Pedido ${numeroPedido} carregado sem campos essenciais.`);
       return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
+    }
+
+    // 💡 Bloqueio de pedidos muito antigos (>30 dias)
+    const dataPedido = new Date(pedido.dataPedido || pedido.data || '');
+    const hoje = new Date();
+    const diffDias = Math.floor((hoje - dataPedido) / (1000 * 60 * 60 * 24));
+    if (diffDias > 30) {
+      console.log(`🛑 Pedido ${numeroPedido} ignorado. Data muito antiga (${diffDias} dias atrás).`);
+      return res.status(200).json({ mensagem: 'Pedido antigo demais. Ignorado.' });
     }
 
     if (pedido.situacao !== 3) {
@@ -121,24 +128,23 @@ router.post('/', async (req, res) => {
         if (!produtoId) continue;
 
         console.log(`🔍 Buscando produto ${produtoId}`);
-        const produto = await getProdutoFromTinyV3(produtoId);
+        let produto = await getProdutoFromTinyV3(produtoId);
 
-        // Retry curto para erro 429
+        // Retry leve se falhou
         if (!produto) {
-          console.warn(`⚠️ Produto ID ${produtoId} retornou nulo. Tentando novamente após 3s...`);
+          console.warn(`⚠️ Retentando produto ID ${produtoId}...`);
           await delay(3000);
-          const retryProduto = await getProdutoFromTinyV3(produtoId);
-          if (!retryProduto) continue;
-          produto = retryProduto;
+          produto = await getProdutoFromTinyV3(produtoId);
         }
+
+        if (!produto) continue;
 
         const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
         const marca = produto.marca?.nome?.trim();
         if (!marca) continue;
 
         itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
-        await delay(300); // espaçamento entre requisições
-
+        await delay(250);
       } catch (erroProduto) {
         console.error(`❌ Erro ao buscar produto do item:`, erroProduto);
       }
