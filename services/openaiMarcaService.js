@@ -30,24 +30,45 @@ Responda apenas com o nome da marca inferida. Se não conseguir inferir, respond
   }
 }
 
+// 🔤 Função auxiliar para normalizar textos (sem acento, caixa baixa, etc)
+function normalizarTexto(txt) {
+  return txt?.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 // 🧠 Análise de pedido + fornecedores → IA escolhe fornecedor mais compatível
 async function analisarPedidoViaIA(pedidoContexto, listaFornecedores) {
   const { marca, produtoSKU, quantidade, valorUnitario, produto } = pedidoContexto || {};
 
+  // ⚠️ Validação básica
   if (!marca || !produtoSKU || !quantidade || !valorUnitario || !Array.isArray(listaFornecedores) || listaFornecedores.length === 0) {
     console.warn('⚠️ Dados insuficientes para análise IA:', { pedidoContexto, listaFornecedores });
+    return null;
+  }
+
+  // 🔍 Reduzir lista de fornecedores relevantes por similaridade com a marca
+  const marcaNorm = normalizarTexto(marca);
+  const fornecedoresFiltrados = listaFornecedores.filter(f =>
+    normalizarTexto(f.nome).includes(marcaNorm)
+  ).slice(0, 10); // Limita a 10 fornecedores no prompt
+
+  if (fornecedoresFiltrados.length === 0) {
+    console.warn(`⚠️ Nenhum fornecedor compatível com a marca '${marca}' foi encontrado para análise IA.`);
     return null;
   }
 
   const prompt = `
 Você é uma IA que analisa um item de pedido de venda no ERP Tiny. Com base nas informações do produto, quantidade, preço e lista de fornecedores disponíveis, escolha o fornecedor mais compatível com a marca e características do produto.
 
-⚠️ DICA IMPORTANTE:
-- Ignore acentos e diferenças de caixa (maiúsculas/minúsculas) nos nomes dos fornecedores.
-- Faça correspondência por similaridade textual entre o nome da marca e o nome do fornecedor.
-- Utilize a marca e o SKU como base principal para inferir o fornecedor correto.
+⚠️ DICAS:
+- Ignore acentos e diferenças de caixa nos nomes dos fornecedores.
+- Considere que "Acend Iluminação" pode corresponder a "FORNECEDOR ACEND ILUMINACAO".
+- Compare por similaridade textual com foco na marca e SKU.
 
-Responda SOMENTE com um JSON na estrutura abaixo, sem explicações adicionais:
+Responda SOMENTE com um JSON na estrutura abaixo:
 
 {
   "itens": [
@@ -62,17 +83,14 @@ Responda SOMENTE com um JSON na estrutura abaixo, sem explicações adicionais:
   ]
 }
 
-### DADOS DO PRODUTO
+### PRODUTO
 SKU: ${produtoSKU}
 Marca detectada: ${marca}
 Quantidade: ${quantidade}
 Valor unitário: ${valorUnitario}
 
-JSON do produto:
-${JSON.stringify(produto, null, 2)}
-
-### FORNECEDORES DISPONÍVEIS
-${JSON.stringify(listaFornecedores, null, 2)}
+### FORNECEDORES
+${JSON.stringify(fornecedoresFiltrados, null, 2)}
 `;
 
   try {
@@ -95,8 +113,7 @@ ${JSON.stringify(listaFornecedores, null, 2)}
       return null;
     }
 
-    const parsed = JSON.parse(jsonString);
-    return parsed;
+    return JSON.parse(jsonString);
   } catch (err) {
     console.error('❌ Erro ao interpretar resposta da IA:', err.message);
     return { erro: 'Resposta inválida da IA' };
