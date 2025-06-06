@@ -92,7 +92,6 @@ router.post('/', async (req, res) => {
       return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
     }
 
-    // 💡 Bloqueio de pedidos muito antigos (>30 dias)
     const dataPedido = new Date(pedido.dataPedido || pedido.data || '');
     const hoje = new Date();
     const diffDias = Math.floor((hoje - dataPedido) / (1000 * 60 * 60 * 24));
@@ -130,7 +129,6 @@ router.post('/', async (req, res) => {
         console.log(`🔍 Buscando produto ${produtoId}`);
         let produto = await getProdutoFromTinyV3(produtoId);
 
-        // Retry leve se falhou
         if (!produto) {
           console.warn(`⚠️ Retentando produto ID ${produtoId}...`);
           await delay(3000);
@@ -160,9 +158,24 @@ router.post('/', async (req, res) => {
           || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
 
         if (!fornecedor) {
-          const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
-          if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
-            fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
+          const pedidoContexto = {
+            marca,
+            produtoSKU: itensDaMarca[0]?.sku || '',
+            quantidade: itensDaMarca[0]?.quantidade || 1,
+            valorUnitario: itensDaMarca[0]?.valorUnitario || 0,
+            produto: itensDaMarca[0]?.produto || {}
+          };
+
+          if (!Array.isArray(fornecedores) || fornecedores.length === 0) {
+            console.warn(`⚠️ Lista de fornecedores está vazia. Pulando IA para marca ${marca}.`);
+            continue;
+          }
+
+          console.log('🤖 IA - Enviando prompt...');
+          const respostaIA = await analisarPedidoViaIA(pedidoContexto, fornecedores);
+
+          if (respostaIA?.itens?.[0]?.deveGerarOC && respostaIA.itens?.[0]?.idFornecedor) {
+            fornecedor = fornecedores.find(f => f.id === respostaIA.itens[0].idFornecedor);
           }
         }
 
