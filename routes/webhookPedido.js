@@ -42,7 +42,7 @@ async function listarTodosFornecedores() {
 
   try {
     while (page <= MAX_PAGINAS) {
-      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=J&nome=FORNECEDOR&page=${page}&limit=${limit}`, {
+      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=J&page=${page}&limit=${limit}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -54,7 +54,17 @@ async function listarTodosFornecedores() {
       await delay(500);
     }
 
-    return Array.from(new Map(todos.map(f => [f.id, f])).values());
+    const fornecedoresValidos = todos.filter(c =>
+      c.nome && normalizarTexto(c.nome).includes('fornecedor')
+    );
+
+    console.log(`📦 Fornecedores PJ encontrados: ${fornecedoresValidos.length}`);
+    console.table(fornecedoresValidos.map(f => ({
+      id: f.id,
+      nome: f.nome
+    })));
+
+    return fornecedoresValidos;
   } catch (err) {
     console.error('❌ Erro ao buscar fornecedores:', err.message);
     return [];
