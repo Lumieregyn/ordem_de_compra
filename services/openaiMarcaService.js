@@ -1,9 +1,8 @@
 const OpenAI = require('openai');
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-function normalizarTexto(txt) {
-  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
-}
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 // 🔍 Inferência de marca a partir de um produto isolado
 async function inferirMarcaViaIA(produto) {
@@ -32,17 +31,21 @@ Responda apenas com o nome da marca inferida. Se não conseguir inferir, respond
 }
 
 // 🧠 Análise de pedido + fornecedores → IA escolhe fornecedor mais compatível
-async function analisarPedidoViaIA(pedidoContexto, listaFornecedores = []) {
-  // ✅ Validação prévia
-  if (!pedidoContexto?.produto || !Array.isArray(listaFornecedores) || listaFornecedores.length === 0) {
+async function analisarPedidoViaIA(pedidoContexto, listaFornecedores) {
+  const { marca, produtoSKU, quantidade, valorUnitario } = pedidoContexto || {};
+
+  // ⚠️ Validação básica
+  if (!marca || !produtoSKU || !quantidade || !valorUnitario || !Array.isArray(listaFornecedores) || listaFornecedores.length === 0) {
     console.warn('⚠️ Dados insuficientes para análise IA:', { pedidoContexto, listaFornecedores });
-    return { erro: 'Dados insuficientes' };
+    return null;
   }
 
   const prompt = `
 Você é uma IA que analisa um item de pedido de venda no ERP Tiny. Com base nas informações do produto, quantidade, preço e lista de fornecedores disponíveis, escolha o fornecedor mais compatível com a marca e características do produto.
 
-Retorne APENAS um JSON com a estrutura abaixo:
+⚠️ DICA IMPORTANTE: Considere que nomes de fornecedores podem ter pequenas variações, acentos ou abreviações. Exemplo: "Acend Iluminação" pode corresponder a "FORNECEDOR ACEND ILUMINACAO". Faça comparação por similaridade e ignore acentos/letras maiúsculas.
+
+Responda SOMENTE com um JSON na estrutura abaixo, sem explicações adicionais:
 
 {
   "itens": [
@@ -57,19 +60,14 @@ Retorne APENAS um JSON com a estrutura abaixo:
   ]
 }
 
-### DADOS DO PEDIDO
-Produto:
-${JSON.stringify(pedidoContexto.produto, null, 2)}
-
-Quantidade: ${pedidoContexto.quantidade}
-Valor unitário: ${pedidoContexto.valorUnitario}
-Marca detectada: ${pedidoContexto.marca}
+### DADOS DO PRODUTO
+SKU: ${produtoSKU}
+Marca detectada: ${marca}
+Quantidade: ${quantidade}
+Valor unitário: ${valorUnitario}
 
 ### FORNECEDORES DISPONÍVEIS
-${JSON.stringify(listaFornecedores.map(f => ({
-  id: f.id,
-  nome: normalizarTexto(f.nome)
-})), null, 2)}
+${JSON.stringify(listaFornecedores, null, 2)}
 `;
 
   try {
@@ -80,17 +78,14 @@ ${JSON.stringify(listaFornecedores.map(f => ({
       temperature: 0.2,
     });
 
-    const resposta = completion.choices[0].message.content.trim();
-    console.log('🔎 RESPOSTA IA FORNECEDOR:', resposta);
+    const text = completion.choices[0].message.content.trim();
+    console.log('🔎 RESPOSTA IA FORNECEDOR:', text);
 
-    const start = resposta.indexOf('{');
-    const end = resposta.lastIndexOf('}');
-    if (start === -1 || end === -1) throw new Error('JSON malformado na resposta da IA');
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    const jsonString = text.substring(start, end + 1);
 
-    const jsonString = resposta.substring(start, end + 1);
-    const parsed = JSON.parse(jsonString);
-    return parsed?.itens?.[0] || null;
-
+    return JSON.parse(jsonString);
   } catch (err) {
     console.error('❌ Erro ao interpretar resposta da IA:', err.message);
     return { erro: 'Resposta inválida da IA' };
