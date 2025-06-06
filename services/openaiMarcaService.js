@@ -1,15 +1,8 @@
 const OpenAI = require('openai');
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 function normalizarTexto(txt) {
-  return txt?.normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9]/g, '')
-    .toLowerCase()
-    .trim();
+  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
 }
 
 // 🔍 Inferência de marca a partir de um produto isolado
@@ -20,8 +13,7 @@ Você é uma IA que analisa dados de produtos de um ERP (Tiny) e tenta inferir a
 Abaixo está o JSON do produto:
 ${JSON.stringify(produto, null, 2)}
 
-Responda apenas com o nome da marca inferida (sem aspas). Caso não consiga, responda com "Desconhecida".
-Use nomes normalizados (sem acentos) para facilitar a comparação futura.
+Responda apenas com o nome da marca inferida. Se não conseguir inferir, responda "Desconhecida".
 `;
 
   try {
@@ -32,7 +24,7 @@ Use nomes normalizados (sem acentos) para facilitar a comparação futura.
     });
 
     const marca = completion.choices[0].message.content.trim();
-    return normalizarTexto(marca);
+    return marca;
   } catch (err) {
     console.error('❌ Erro na inferência de marca via IA:', err.message);
     return null;
@@ -40,13 +32,18 @@ Use nomes normalizados (sem acentos) para facilitar a comparação futura.
 }
 
 // 🧠 Análise de pedido + fornecedores → IA escolhe fornecedor mais compatível
-async function analisarPedidoViaIA(pedidoContexto, listaFornecedores) {
+async function analisarPedidoViaIA(pedidoContexto, listaFornecedores = []) {
+  // ✅ Validação prévia
+  if (!pedidoContexto?.produto || !Array.isArray(listaFornecedores) || listaFornecedores.length === 0) {
+    console.warn('⚠️ Dados insuficientes para análise IA:', { pedidoContexto, listaFornecedores });
+    return { erro: 'Dados insuficientes' };
+  }
+
   const prompt = `
 Você é uma IA que analisa um item de pedido de venda no ERP Tiny. Com base nas informações do produto, quantidade, preço e lista de fornecedores disponíveis, escolha o fornecedor mais compatível com a marca e características do produto.
 
-Sempre que possível, normalize os nomes (remova acentos, espaços extras, letras maiúsculas) para comparar corretamente com os fornecedores.
-
 Retorne APENAS um JSON com a estrutura abaixo:
+
 {
   "itens": [
     {
@@ -69,7 +66,10 @@ Valor unitário: ${pedidoContexto.valorUnitario}
 Marca detectada: ${pedidoContexto.marca}
 
 ### FORNECEDORES DISPONÍVEIS
-${JSON.stringify(listaFornecedores, null, 2)}
+${JSON.stringify(listaFornecedores.map(f => ({
+  id: f.id,
+  nome: normalizarTexto(f.nome)
+})), null, 2)}
 `;
 
   try {
@@ -80,13 +80,14 @@ ${JSON.stringify(listaFornecedores, null, 2)}
       temperature: 0.2,
     });
 
-    const text = completion.choices[0].message.content.trim();
-    console.log('🔎 RESPOSTA IA FORNECEDOR:', text);
+    const resposta = completion.choices[0].message.content.trim();
+    console.log('🔎 RESPOSTA IA FORNECEDOR:', resposta);
 
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    const jsonString = text.substring(start, end + 1);
+    const start = resposta.indexOf('{');
+    const end = resposta.lastIndexOf('}');
+    if (start === -1 || end === -1) throw new Error('JSON malformado na resposta da IA');
 
+    const jsonString = resposta.substring(start, end + 1);
     const parsed = JSON.parse(jsonString);
     return parsed?.itens?.[0] || null;
 
