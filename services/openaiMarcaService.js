@@ -32,9 +32,8 @@ Responda apenas com o nome da marca inferida. Se não conseguir inferir, respond
 
 // 🧠 Análise de pedido + fornecedores → IA escolhe fornecedor mais compatível
 async function analisarPedidoViaIA(pedidoContexto, listaFornecedores) {
-  const { marca, produtoSKU, quantidade, valorUnitario } = pedidoContexto || {};
+  const { marca, produtoSKU, quantidade, valorUnitario, produto } = pedidoContexto || {};
 
-  // ⚠️ Validação básica
   if (!marca || !produtoSKU || !quantidade || !valorUnitario || !Array.isArray(listaFornecedores) || listaFornecedores.length === 0) {
     console.warn('⚠️ Dados insuficientes para análise IA:', { pedidoContexto, listaFornecedores });
     return null;
@@ -43,7 +42,10 @@ async function analisarPedidoViaIA(pedidoContexto, listaFornecedores) {
   const prompt = `
 Você é uma IA que analisa um item de pedido de venda no ERP Tiny. Com base nas informações do produto, quantidade, preço e lista de fornecedores disponíveis, escolha o fornecedor mais compatível com a marca e características do produto.
 
-⚠️ DICA IMPORTANTE: Considere que nomes de fornecedores podem ter pequenas variações, acentos ou abreviações. Exemplo: "Acend Iluminação" pode corresponder a "FORNECEDOR ACEND ILUMINACAO". Faça comparação por similaridade e ignore acentos/letras maiúsculas.
+⚠️ DICA IMPORTANTE:
+- Ignore acentos e diferenças de caixa (maiúsculas/minúsculas) nos nomes dos fornecedores.
+- Faça correspondência por similaridade textual entre o nome da marca e o nome do fornecedor.
+- Utilize a marca e o SKU como base principal para inferir o fornecedor correto.
 
 Responda SOMENTE com um JSON na estrutura abaixo, sem explicações adicionais:
 
@@ -66,6 +68,9 @@ Marca detectada: ${marca}
 Quantidade: ${quantidade}
 Valor unitário: ${valorUnitario}
 
+JSON do produto:
+${JSON.stringify(produto, null, 2)}
+
 ### FORNECEDORES DISPONÍVEIS
 ${JSON.stringify(listaFornecedores, null, 2)}
 `;
@@ -85,7 +90,13 @@ ${JSON.stringify(listaFornecedores, null, 2)}
     const end = text.lastIndexOf('}');
     const jsonString = text.substring(start, end + 1);
 
-    return JSON.parse(jsonString);
+    if (!jsonString) {
+      console.warn('⚠️ Resposta da IA sem JSON válido detectado.');
+      return null;
+    }
+
+    const parsed = JSON.parse(jsonString);
+    return parsed;
   } catch (err) {
     console.error('❌ Erro ao interpretar resposta da IA:', err.message);
     return { erro: 'Resposta inválida da IA' };
