@@ -4,6 +4,14 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+function normalizarTexto(txt) {
+  return txt?.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 // 🔍 Inferência de marca a partir de um produto isolado
 async function inferirMarcaViaIA(produto) {
   const prompt = `
@@ -12,7 +20,8 @@ Você é uma IA que analisa dados de produtos de um ERP (Tiny) e tenta inferir a
 Abaixo está o JSON do produto:
 ${JSON.stringify(produto, null, 2)}
 
-Responda apenas com o nome da marca inferida. Se não conseguir inferir, responda "Desconhecida".
+Responda apenas com o nome da marca inferida (sem aspas). Caso não consiga, responda com "Desconhecida".
+Use nomes normalizados (sem acentos) para facilitar a comparação futura.
 `;
 
   try {
@@ -23,7 +32,7 @@ Responda apenas com o nome da marca inferida. Se não conseguir inferir, respond
     });
 
     const marca = completion.choices[0].message.content.trim();
-    return marca;
+    return normalizarTexto(marca);
   } catch (err) {
     console.error('❌ Erro na inferência de marca via IA:', err.message);
     return null;
@@ -35,8 +44,9 @@ async function analisarPedidoViaIA(pedidoContexto, listaFornecedores) {
   const prompt = `
 Você é uma IA que analisa um item de pedido de venda no ERP Tiny. Com base nas informações do produto, quantidade, preço e lista de fornecedores disponíveis, escolha o fornecedor mais compatível com a marca e características do produto.
 
-Retorne APENAS um JSON com a estrutura abaixo:
+Sempre que possível, normalize os nomes (remova acentos, espaços extras, letras maiúsculas) para comparar corretamente com os fornecedores.
 
+Retorne APENAS um JSON com a estrutura abaixo:
 {
   "itens": [
     {
@@ -63,6 +73,7 @@ ${JSON.stringify(listaFornecedores, null, 2)}
 `;
 
   try {
+    console.log('🤖 IA - Enviando prompt...');
     const completion = await openai.chat.completions.create({
       model: 'gpt-4',
       messages: [{ role: 'user', content: prompt }],
@@ -76,7 +87,9 @@ ${JSON.stringify(listaFornecedores, null, 2)}
     const end = text.lastIndexOf('}');
     const jsonString = text.substring(start, end + 1);
 
-    return JSON.parse(jsonString);
+    const parsed = JSON.parse(jsonString);
+    return parsed?.itens?.[0] || null;
+
   } catch (err) {
     console.error('❌ Erro ao interpretar resposta da IA:', err.message);
     return { erro: 'Resposta inválida da IA' };
