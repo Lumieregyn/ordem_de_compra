@@ -4,7 +4,6 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// 🔍 Inferência de marca a partir de um produto isolado
 async function inferirMarcaViaIA(produto) {
   const prompt = `
 Você é uma IA que analisa dados de produtos de um ERP (Tiny) e tenta inferir a marca do produto com base nos dados disponíveis.
@@ -30,7 +29,7 @@ Responda apenas com o nome da marca inferida. Se não conseguir inferir, respond
   }
 }
 
-// 🔤 Função auxiliar para normalizar textos (sem acento, caixa baixa, etc)
+// Função auxiliar para fallback de texto
 function normalizarTexto(txt) {
   return txt?.normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -39,24 +38,23 @@ function normalizarTexto(txt) {
     .trim();
 }
 
-// 🧠 Análise de pedido + fornecedores → IA escolhe fornecedor mais compatível
 async function analisarPedidoViaIA(pedidoContexto, listaFornecedores) {
   const { marca, produtoSKU, quantidade, valorUnitario, produto } = pedidoContexto || {};
 
-  // ⚠️ Validação básica
   if (!marca || !produtoSKU || !quantidade || !valorUnitario || !Array.isArray(listaFornecedores) || listaFornecedores.length === 0) {
     console.warn('⚠️ Dados insuficientes para análise IA:', { pedidoContexto, listaFornecedores });
     return null;
   }
 
-  // 🔍 Reduzir lista de fornecedores relevantes por similaridade com a marca
   const marcaNorm = normalizarTexto(marca);
-  const fornecedoresFiltrados = listaFornecedores.filter(f =>
-    normalizarTexto(f.nome).includes(marcaNorm)
-  ).slice(0, 10); // Limita a 10 fornecedores no prompt
+
+  // 🔍 Reduz lista com base no nomeNormalizado (não nomeOriginal)
+  const fornecedoresFiltrados = listaFornecedores
+    .filter(f => normalizarTexto(f.nomeNormalizado).includes(marcaNorm))
+    .slice(0, 10);
 
   if (fornecedoresFiltrados.length === 0) {
-    console.warn(`⚠️ Nenhum fornecedor compatível com a marca '${marca}' foi encontrado para análise IA.`);
+    console.warn(`⚠️ Nenhum fornecedor compatível com a marca '${marca}' para análise IA.`);
     return null;
   }
 
@@ -64,9 +62,8 @@ async function analisarPedidoViaIA(pedidoContexto, listaFornecedores) {
 Você é uma IA que analisa um item de pedido de venda no ERP Tiny. Com base nas informações do produto, quantidade, preço e lista de fornecedores disponíveis, escolha o fornecedor mais compatível com a marca e características do produto.
 
 ⚠️ DICAS:
-- Ignore acentos e diferenças de caixa nos nomes dos fornecedores.
-- Considere que "Acend Iluminação" pode corresponder a "FORNECEDOR ACEND ILUMINACAO".
-- Compare por similaridade textual com foco na marca e SKU.
+- Ignore acentos e diferenças de caixa nos nomes.
+- Compare por similaridade textual, principalmente com foco na marca e SKU.
 
 Responda SOMENTE com um JSON na estrutura abaixo:
 
@@ -90,7 +87,14 @@ Quantidade: ${quantidade}
 Valor unitário: ${valorUnitario}
 
 ### FORNECEDORES
-${JSON.stringify(fornecedoresFiltrados, null, 2)}
+${JSON.stringify(
+  fornecedoresFiltrados.map(f => ({
+    idFornecedor: f.id,
+    nomeFornecedor: f.nomeOriginal
+  })),
+  null,
+  2
+)}
 `;
 
   try {
