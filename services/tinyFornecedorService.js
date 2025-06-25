@@ -6,6 +6,20 @@ const API_TOKEN = process.env.TINY_API_TOKEN;
 // Delay para evitar erro 429
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Remove ruídos comuns e normaliza nome para facilitar o match.
+ */
+function normalizarFornecedor(nome) {
+  return nome
+    ?.normalize('NFD')                             // remove acentuação
+    .replace(/[̀-ͯ]/g, '')                         
+    .replace(/[^a-zA-Z0-9\s]/g, '')                // remove símbolos
+    .replace(/\b(FORNECEDOR|LTDA|ME|URGENTE)\b/gi, '') // remove palavras irrelevantes
+    .replace(/\s+/g, ' ')                          // normaliza espaços
+    .trim()
+    .toLowerCase();                                // tudo minúsculo
+}
+
 async function listarTodosFornecedores() {
   const fornecedoresMap = new Map();
   const maxPaginas = 10;
@@ -26,7 +40,11 @@ async function listarTodosFornecedores() {
           f?.nome?.toUpperCase().startsWith('FORNECEDOR ') &&
           f?.tipoPessoa === 'J'
         ) {
-          fornecedoresMap.set(f.id, f); // evita duplicatas
+          fornecedoresMap.set(f.id, {
+            id: f.id,
+            nomeOriginal: f.nome,
+            nomeNormalizado: normalizarFornecedor(f.nome)
+          });
         }
       });
 
@@ -41,10 +59,11 @@ async function listarTodosFornecedores() {
   }
 
   const fornecedores = Array.from(fornecedoresMap.values());
-  console.log(`[listarTodosFornecedores] Total filtrado: ${fornecedores.length}`);
+  console.log(`[listarTodosFornecedores] Total normalizado: ${fornecedores.length}`);
   return fornecedores;
 }
 
 module.exports = {
-  listarTodosFornecedores
+  listarTodosFornecedores,
+  normalizarFornecedor // exportado caso necessário em outro módulo
 };
