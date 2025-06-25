@@ -28,10 +28,9 @@ Responda apenas com o nome da marca inferida. Se não conseguir inferir, respond
   }
 }
 
-// 🔤 Normalizador simples
 function normalizarTexto(txt) {
   return txt?.normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .replace(/[^a-zA-Z0-9]/g, '')
     .toLowerCase()
     .trim();
@@ -47,16 +46,16 @@ async function analisarPedidoViaIA(pedidoContexto, listaFornecedores) {
 
   const marcaNorm = normalizarTexto(marca);
 
-  // ✅ Proteção contra nomeNormalizado undefined
   const fornecedoresFiltrados = listaFornecedores
-    .filter(f =>
-      typeof f?.nomeNormalizado === 'string' &&
-      normalizarTexto(f.nomeNormalizado).includes(marcaNorm)
-    )
+    .filter(f => {
+      const nomeNorm = normalizarTexto(f?.nomeNormalizado || '');
+      return nomeNorm.includes(marcaNorm) || marcaNorm.includes(nomeNorm);
+    })
     .slice(0, 10);
 
   if (fornecedoresFiltrados.length === 0) {
     console.warn(`⚠️ Nenhum fornecedor compatível com a marca '${marca}' para análise IA.`);
+    console.table(listaFornecedores.map(f => ({ id: f.id, nomeNormalizado: f.nomeNormalizado })));
     return null;
   }
 
