@@ -21,15 +21,14 @@ Responda apenas com o nome da marca inferida. Se não conseguir inferir, respond
       temperature: 0.2,
     });
 
-    const marca = completion.choices[0].message.content.trim();
-    return marca;
+    return completion.choices[0].message.content.trim();
   } catch (err) {
     console.error('❌ Erro na inferência de marca via IA:', err.message);
     return null;
   }
 }
 
-// Função auxiliar para fallback de texto
+// 🔤 Normalizador simples
 function normalizarTexto(txt) {
   return txt?.normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -48,9 +47,12 @@ async function analisarPedidoViaIA(pedidoContexto, listaFornecedores) {
 
   const marcaNorm = normalizarTexto(marca);
 
-  // 🔍 Reduz lista com base no nomeNormalizado (não nomeOriginal)
+  // ✅ Proteção contra nomeNormalizado undefined
   const fornecedoresFiltrados = listaFornecedores
-    .filter(f => normalizarTexto(f.nomeNormalizado).includes(marcaNorm))
+    .filter(f =>
+      typeof f?.nomeNormalizado === 'string' &&
+      normalizarTexto(f.nomeNormalizado).includes(marcaNorm)
+    )
     .slice(0, 10);
 
   if (fornecedoresFiltrados.length === 0) {
