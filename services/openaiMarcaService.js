@@ -60,14 +60,15 @@ async function analisarPedidoViaIA(pedidoContexto, listaFornecedores) {
   }
 
   const prompt = `
-Você é uma IA que analisa um item de pedido de venda no ERP Tiny. Com base nas informações do produto, quantidade, preço e lista de fornecedores disponíveis, escolha o fornecedor mais compatível com a marca e características do produto.
+Você é uma IA que deve escolher o melhor fornecedor para um item de pedido de venda no ERP Tiny.
 
-⚠️ DICAS:
-- Ignore acentos e diferenças de caixa nos nomes.
-- Compare por similaridade textual, principalmente com foco na marca e SKU.
+INSTRUÇÕES IMPORTANTES:
+- NÃO explique sua decisão.
+- NÃO forneça comentários.
+- Responda APENAS com um JSON no formato exato abaixo.
+- Se não houver fornecedor compatível, retorne deveGerarOC: false.
 
-Responda SOMENTE com um JSON na estrutura abaixo:
-
+FORMATO OBRIGATÓRIO:
 {
   "itens": [
     {
@@ -81,13 +82,13 @@ Responda SOMENTE com um JSON na estrutura abaixo:
   ]
 }
 
-### PRODUTO
+DADOS DO PRODUTO:
 SKU: ${produtoSKU}
-Marca detectada: ${marca}
+Marca: ${marca}
 Quantidade: ${quantidade}
 Valor unitário: ${valorUnitario}
 
-### FORNECEDORES
+FORNECEDORES DISPONÍVEIS:
 ${JSON.stringify(
   fornecedoresFiltrados.map(f => ({
     idFornecedor: f.id,
