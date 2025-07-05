@@ -1,120 +1,75 @@
 const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
 
-// 📦 Lista paginada de produtos da Tiny ERP
-async function listarProdutosTiny() {
-  let token;
-  try {
-    token = await getAccessToken();
-    if (!token) {
-      console.warn('⚠️ Token da Tiny não encontrado.');
-      return [];
-    }
-  } catch (err) {
-    console.error('❌ Erro ao obter token do Redis:', err.message);
-    return [];
-  }
+// Ajuste: maior limite por página para reduzir número de requisições, conforme Tiny ERP
+const DELAY_MS = 500;
+const MAX_PAGINAS = Infinity;  // Busca até não retornar mais itens
+const PAGE_SIZE = 100; // Ajuste conforme limite suportado pela API
+const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 
-  const produtos = [];
-  let pagina = 1;
-  const tamanhoPagina = 50;
-
-  try {
-    while (true) {
-      console.log(`🔄 Buscando produtos - Página ${pagina}`);
-
-      const resp = await axios.get('https://erp.tiny.com.br/public-api/v3/produtos', {
-        headers: { Authorization: `Bearer ${token}` },
-        params: { pagina, tamanhoPagina }
-      });
-
-      if (!resp.data || !Array.isArray(resp.data.itens)) {
-        console.warn('⚠️ Estrutura inesperada no retorno da API de produtos:', resp.data);
-        break;
-      }
-
-      const itens = resp.data.itens;
-      if (itens.length === 0) break;
-
-      for (const item of itens) {
-        produtos.push({
-          id: item.id,
-          sku: item.sku,
-          marca: item.marca?.nome || null
-        });
-      }
-
-      pagina++;
-      await new Promise(res => setTimeout(res, 1000)); // ⏱️ Delay para evitar erro 429
-      if (pagina > 3) break; // ⚠️ LIMITADOR DE TESTE — remova em produção
-    }
-
-    console.log(`✅ ${produtos.length} produtos carregados da Tiny`);
-    return produtos;
-
-  } catch (err) {
-    console.error('❌ Erro ao buscar produtos da Tiny:', err.response?.data || err.message);
-    return [];
-  }
+/**
+ * Normaliza o nome do fornecedor para matching.
+ */
+function normalizarFornecedor(nome) {
+  return nome
+    ?.normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')  // Remove acentuação
+    .replace(/[^a-zA-Z0-9\s]/g, '')  // Remove símbolos
+    .replace(/\s+/g, ' ')           // Espaços únicos
+    .trim()
+    .toLowerCase();
 }
 
-// 🔍 Consulta individual de produto via ID no Tiny ERP (API v3) com retry para erro 429
-async function getProdutoFromTinyV3(produtoId) {
-  console.log(`🔍 Buscando produto ID: ${produtoId}`);
+/**
+ * Lista todos os fornecedores Pessoa Jurídica via API V3, sem duplicatas.
+ * Continua paginando até não retornar mais itens.
+ * @returns {Promise<Array<{id: number, nomeOriginal: string, nomeNormalizado: string}>>}
+ */
+async function listarTodosFornecedores() {
+  const token = await getAccessToken();
+  if (!token) return [];
 
-  let token;
+  const allContacts = [];
+  let page = 1;
+
   try {
-    token = await getAccessToken();
-    if (!token) {
-      console.error('❌ Token OAuth2 não encontrado. Abortando requisição.');
-      return null;
-    }
-  } catch (err) {
-    console.error('❌ Erro ao obter token do Redis:', err.message);
-    return null;
-  }
-
-  const url = `https://erp.tiny.com.br/public-api/v3/produtos/${produtoId}`;
-  const maxTentativas = 5;
-
-  for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
-    try {
-      const response = await axios.get(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
+    while (page <= MAX_PAGINAS) {
+      const response = await axios.get(
+        `${TINY_API_V3_BASE}/contatos`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { tipo: 'J', page, limit: PAGE_SIZE }
         }
-      });
+      );
 
-      if (response.status !== 200) {
-        console.error(`❌ Resposta inesperada da API (Status: ${response.status})`);
-        return null;
-      }
+      const contacts = response.data?.itens || [];
+      if (contacts.length === 0) break;
 
-      console.log(`✅ Produto ID ${produtoId} carregado com sucesso`);
-      return response.data;
-
-    } catch (error) {
-      const status = error.response?.status;
-      const msg = error.response?.data || error.message;
-
-      if (status === 429 && tentativa < maxTentativas) {
-        const espera = 500 * Math.pow(2, tentativa); // backoff exponencial
-        console.warn(`⏳ Tentativa ${tentativa} falhou com 429. Aguardando ${espera}ms antes de tentar novamente.`);
-        await new Promise((res) => setTimeout(res, espera));
-      } else {
-        console.error(`❌ Erro ao buscar produto ID ${produtoId} (Status: ${status}):`);
-        console.error(msg);
-        return null;
-      }
+      allContacts.push(...contacts);
+      page++;
+      await new Promise(res => setTimeout(res, DELAY_MS));
     }
-  }
 
-  console.error(`❌ Erro 429 persistente após ${maxTentativas} tentativas ao buscar produto ${produtoId}`);
-  return null;
+    // Deduplica fornecedores por ID
+    const uniqueMap = new Map(allContacts.map(f => [f.id, f]));
+    const uniqueContacts = Array.from(uniqueMap.values());
+
+    console.log(`📦 Total fornecedores PJ encontrados: ${uniqueContacts.length}`);
+    console.table(uniqueContacts.map(f => ({ id: f.id, nome: f.nome })));
+
+    // Formata para uso no fluxo de seleção
+    return uniqueContacts.map(f => ({
+      id: f.id,
+      nomeOriginal: f.nome,
+      nomeNormalizado: normalizarFornecedor(f.nome)
+    }));
+  } catch (err) {
+    console.error('❌ Erro ao buscar fornecedores:', err.message || err);
+    return [];
+  }
 }
 
 module.exports = {
-  listarProdutosTiny,
-  getProdutoFromTinyV3
+  listarTodosFornecedores,
+  normalizarFornecedor
 };
