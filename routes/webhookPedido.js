@@ -1,30 +1,24 @@
 const express = require('express');
 const router = express.Router();
 
+const { getPedidoCompletoById } = require('../services/tinyPedidoService');
 const { getProdutoFromTinyV3 } = require('../services/tinyProductService');
 const { getAccessToken } = require('../services/tokenService');
-const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
-const { getPedidoCompletoById } = require('../services/tinyPedidoService');
-const axios = require('axios');
+const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
+const { listarTodosFornecedores, normalizarFornecedor } = require('../services/tinyFornecedorService');
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const pedidosProcessados = new Set();
-const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
-const MAX_PAGINAS = 10;
-
-function normalizarTexto(txt) {
-  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
-}
 
 function filtrarItensNecessarios(itens) {
   return itens.filter(item => item.produto?.sku?.toUpperCase().includes('PEDIDO'));
 }
 
-function agruparItensPorMarca(itensComMarca) {
+function agruparItensPorMarca(itens) {
   const grupos = {};
-  for (const item of itensComMarca) {
+  for (const item of itens) {
     const marca = item.marca || 'DESCONHECIDA';
     if (!grupos[marca]) grupos[marca] = [];
     grupos[marca].push(item);
@@ -32,198 +26,146 @@ function agruparItensPorMarca(itensComMarca) {
   return grupos;
 }
 
-async function listarTodosFornecedores() {
-  const token = await getAccessToken();
-  if (!token) return [];
-
-  const todos = [];
-  let page = 1;
-  const limit = 50;
-
-  try {
-    while (page <= MAX_PAGINAS) {
-      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=J&page=${page}&limit=${limit}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      const contatosPagina = response.data.itens || [];
-      if (!contatosPagina.length) break;
-
-      todos.push(...contatosPagina);
-      page++;
-      await delay(500);
-    }
-
-    const fornecedoresValidos = todos.filter(c =>
-      c.nome && normalizarTexto(c.nome).includes('fornecedor')
-    );
-
-    console.log(`📦 Fornecedores PJ encontrados: ${fornecedoresValidos.length}`);
-    console.table(fornecedoresValidos.map(f => ({
-      id: f.id,
-      nome: f.nome
-    })));
-
-    return fornecedoresValidos;
-  } catch (err) {
-    console.error('❌ Erro ao buscar fornecedores:', err.message);
-    return [];
-  }
-}
-
 router.post('/', async (req, res) => {
-  try {
-    const idPedido = req.body?.dados?.id;
-    const numeroRecebido = req.body?.dados?.numero;
+  const idPedido = req.body?.dados?.id;
+  const numeroPedido = req.body?.dados?.numero;
 
-    console.log(`📥 Webhook recebido: ID ${idPedido}, Número ${numeroRecebido}`);
+  console.log(`📥 Webhook recebido: ID ${idPedido}, Número ${numeroPedido}`);
 
-    if (!idPedido || !numeroRecebido) {
-      console.warn('❌ Webhook sem ID ou número de pedido válido');
-      return res.status(200).json({ mensagem: 'Webhook ignorado: dados incompletos.' });
-    }
-
-    if (pedidosProcessados.has(idPedido)) {
-      console.warn(`⏩ Pedido ID ${idPedido} já processado anteriormente. Ignorando duplicado.`);
-      return res.status(200).json({ mensagem: 'Pedido já processado anteriormente.' });
-    }
-
-    const token = await getAccessToken();
-    if (!token) {
-      console.error('❌ Token de acesso não disponível. Abandonando fluxo.');
-      return res.status(500).json({ erro: 'Token indisponível.' });
-    }
-
-    const pedido = await getPedidoCompletoById(idPedido);
-    const numeroPedido = pedido?.numeroPedido || '[sem número]';
-
-    if (!pedido || !pedido.id || !pedido.numeroPedido || pedido.situacao === undefined) {
-      console.warn(`⚠️ Pedido ${numeroPedido} carregado sem campos essenciais.`);
-      return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
-    }
-
-    const dataPedido = new Date(pedido.dataPedido || pedido.data || '');
-    const hoje = new Date();
-    const diffDias = Math.floor((hoje - dataPedido) / (1000 * 60 * 60 * 24));
-    if (diffDias > 30) {
-      console.log(`🛑 Pedido ${numeroPedido} ignorado. Data muito antiga (${diffDias} dias atrás).`);
-      return res.status(200).json({ mensagem: 'Pedido antigo demais. Ignorado.' });
-    }
-
-    if (pedido.situacao !== 3) {
-      console.log(`🛑 Pedido ${numeroPedido} ignorado. Situação atual: ${pedido.situacao}`);
-      return res.status(200).json({
-        mensagem: `Pedido ${numeroPedido} com situação ${pedido.situacao} não será processado.`
-      });
-    }
-
-    pedidosProcessados.add(idPedido);
-
-    const itensFiltrados = filtrarItensNecessarios(pedido.itens);
-    if (itensFiltrados.length === 0) {
-      console.log(`🛑 Pedido ${numeroPedido} sem itens sob encomenda (SKU com "PEDIDO")`);
-      return res.status(200).json({ mensagem: 'Nenhuma OC será gerada. Itens são de estoque.' });
-    }
-
-    const fornecedores = await listarTodosFornecedores();
-    const itensEnriquecidos = [];
-
-    for (const item of itensFiltrados) {
-      try {
-        const produtoId = item.produto?.id;
-        const quantidade = item.quantidade || 1;
-        const valorUnitario = item.valorUnitario || item.valor_unitario || 0;
-
-        if (!produtoId) continue;
-
-        console.log(`🔍 Buscando produto ${produtoId}`);
-        let produto = await getProdutoFromTinyV3(produtoId);
-
-        if (!produto) {
-          console.warn(`⚠️ Retentando produto ID ${produtoId}...`);
-          await delay(3000);
-          produto = await getProdutoFromTinyV3(produtoId);
-        }
-
-        if (!produto) continue;
-
-        const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
-        const marca = produto.marca?.nome?.trim();
-        if (!marca) continue;
-
-        itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
-        await delay(250);
-      } catch (erroProduto) {
-        console.error(`❌ Erro ao buscar produto do item:`, erroProduto);
-      }
-    }
-
-    const agrupadosPorMarca = agruparItensPorMarca(itensEnriquecidos);
-    const resultados = [];
-
-    for (const [marca, itensDaMarca] of Object.entries(agrupadosPorMarca)) {
-      try {
-        const marcaNorm = normalizarTexto(marca);
-        let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
-          || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
-
-        if (!fornecedor) {
-          const pedidoContexto = {
-            marca,
-            produtoSKU: itensDaMarca[0]?.sku || '',
-            quantidade: itensDaMarca[0]?.quantidade || 1,
-            valorUnitario: itensDaMarca[0]?.valorUnitario || 0,
-            produto: itensDaMarca[0]?.produto || {}
-          };
-
-          if (!Array.isArray(fornecedores) || fornecedores.length === 0) {
-            console.warn(`⚠️ Lista de fornecedores está vazia. Pulando IA para marca ${marca}.`);
-            continue;
-          }
-
-          console.log('🤖 IA - Enviando prompt...');
-          const respostaIA = await analisarPedidoViaIA(pedidoContexto, fornecedores);
-
-          if (respostaIA?.itens?.[0]?.deveGerarOC && respostaIA.itens?.[0]?.idFornecedor) {
-            fornecedor = fornecedores.find(f => f.id === respostaIA.itens[0].idFornecedor);
-          }
-        }
-
-        if (!fornecedor) {
-          console.warn(`⚠️ Nenhum fornecedor identificado para marca ${marca}.`);
-          continue;
-        }
-
-        console.log(`🧾 Gerando payload para marca ${marca}`);
-        const payloadOC = gerarPayloadOrdemCompra({
-          numeroPedido: pedido.numeroPedido,
-          nomeCliente: pedido.cliente?.nome || '',
-          dataPrevista: pedido.dataPrevista,
-          itens: itensDaMarca,
-          fornecedor
-        });
-
-        if (!payloadOC || !payloadOC.itens?.length) {
-          console.warn(`❌ Payload inválido para OC da marca ${marca}.`);
-          continue;
-        }
-
-        console.log(`🚚 Enviando OC para fornecedor ${fornecedor.nome}`);
-        const resposta = await enviarOrdemCompra(payloadOC);
-        resultados.push({ marca, fornecedor: fornecedor.nome, status: resposta });
-
-      } catch (erroItem) {
-        console.error(`❌ Erro ao processar grupo da marca ${marca}:`, erroItem);
-      }
-    }
-
-    console.log(`📦 Resultado final:\n`, resultados);
-    return res.status(200).json({ mensagem: 'OC(s) processada(s)', resultados });
-
-  } catch (err) {
-    console.error('❌ Erro geral no webhook:', err);
-    return res.status(500).json({ erro: 'Erro interno no processamento do webhook.' });
+  if (!idPedido || !numeroPedido) {
+    console.warn('❌ Webhook sem ID ou número válido');
+    return res.status(200).json({ mensagem: 'Webhook ignorado: dados incompletos.' });
   }
+
+  if (pedidosProcessados.has(idPedido)) {
+    console.warn(`⏩ Pedido ID ${idPedido} já processado anteriormente.`);
+    return res.status(200).json({ mensagem: 'Pedido duplicado ignorado.' });
+  }
+
+  pedidosProcessados.add(idPedido);
+
+  const pedido = await getPedidoCompletoById(idPedido);
+  if (!pedido?.id || pedido.situacao === undefined) {
+    console.warn(`⚠️ Pedido ${numeroPedido} com dados incompletos.`);
+    return res.status(200).json({ mensagem: 'Pedido incompleto. Ignorado.' });
+  }
+
+  if (pedido.situacao !== 3) {
+    console.log(`🛑 Pedido ${numeroPedido} ignorado. Situação atual: ${pedido.situacao}`);
+    return res.status(200).json({ mensagem: 'Situação inválida para geração de OC.' });
+  }
+
+  const itensFiltrados = filtrarItensNecessarios(pedido.itens);
+  if (itensFiltrados.length === 0) {
+    console.log(`🛑 Pedido ${numeroPedido} sem itens sob encomenda.`);
+    return res.status(200).json({ mensagem: 'Nenhuma OC será gerada.' });
+  }
+
+  const fornecedores = await listarTodosFornecedores();
+  console.log(`📦 Fornecedores PJ encontrados: ${fornecedores.length}`);
+  console.table(fornecedores.map(f => ({ id: f.id, nome: f.nomeOriginal })));
+
+  const itensEnriquecidos = [];
+
+  for (const item of itensFiltrados) {
+    try {
+      const produtoId = item.produto?.id;
+      if (!produtoId) continue;
+
+      console.log(`🔍 Buscando produto ${produtoId}`);
+      let produto = await getProdutoFromTinyV3(produtoId);
+      if (!produto) {
+        console.warn(`⚠️ Retentando produto ID ${produtoId}...`);
+        await delay(3000);
+        produto = await getProdutoFromTinyV3(produtoId);
+      }
+
+      if (!produto) {
+        console.warn(`⚠️ Produto ID ${produtoId} não encontrado`);
+        continue;
+      }
+
+      const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
+      const marca = produto.marca?.nome?.trim() || 'DESCONHECIDA';
+      const quantidade = item.quantidade || 1;
+      const valorUnitario = item.valorUnitario || item.valor_unitario || 0;
+
+      itensEnriquecidos.push({
+        ...item,
+        sku,
+        marca,
+        produto,
+        quantidade,
+        valorUnitario
+      });
+
+      await delay(300);
+    } catch (err) {
+      console.error('❌ Erro ao buscar produto do item:', err.message);
+    }
+  }
+
+  const agrupados = agruparItensPorMarca(itensEnriquecidos);
+  const resultados = [];
+
+  for (const [marca, itensDaMarca] of Object.entries(agrupados)) {
+    try {
+      const marcaNorm = normalizarFornecedor(marca);
+
+      let fornecedor = fornecedores.find(f => f.nomeNormalizado === marcaNorm) ||
+                       fornecedores.find(f => f.nomeNormalizado.includes(marcaNorm));
+
+      if (!fornecedor) {
+        const contexto = {
+          marca,
+          produtoSKU: itensDaMarca[0]?.sku || '',
+          quantidade: itensDaMarca[0]?.quantidade || 1,
+          valorUnitario: itensDaMarca[0]?.valorUnitario || 0,
+          produto: itensDaMarca[0]?.produto || {}
+        };
+
+        const respostaIA = await analisarPedidoViaIA(contexto, fornecedores);
+        const itemIA = respostaIA?.itens?.[0];
+        if (itemIA?.deveGerarOC && itemIA?.idFornecedor) {
+          fornecedor = fornecedores.find(f => f.id === itemIA.idFornecedor);
+        }
+      }
+
+      if (!fornecedor) {
+        console.warn(`⚠️ Nenhum fornecedor identificado para marca ${marca}`);
+        continue;
+      }
+
+      console.log(`🧾 Gerando payload para marca ${marca}`);
+      const payload = gerarPayloadOrdemCompra({
+        numeroPedido,
+        nomeCliente: pedido.cliente?.nome || '',
+        dataPrevista: pedido.dataPrevista,
+        itens: itensDaMarca,
+        fornecedor
+      });
+
+      if (!payload || !payload.itens?.length) {
+        console.warn(`❌ Payload inválido para OC da marca ${marca}`);
+        continue;
+      }
+
+      console.log(`🚚 Enviando OC para fornecedor ${fornecedor.nomeOriginal}`);
+      const resposta = await enviarOrdemCompra(payload);
+
+      resultados.push({
+        marca,
+        fornecedor: fornecedor.nomeOriginal,
+        status: resposta
+      });
+
+    } catch (err) {
+      console.error(`❌ Erro ao processar grupo da marca ${marca}:`, err.message || err);
+    }
+  }
+
+  console.log('📦 Resultado final:\n', resultados);
+  return res.status(200).json({ mensagem: 'Processamento finalizado', resultados });
 });
 
 module.exports = router;
