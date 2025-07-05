@@ -12,12 +12,10 @@ const { selecionarFornecedor } = require('../services/selecionarFornecedor');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const pedidosProcessados = new Set();
 
-function normalizarTexto(txt) {
-  return txt?.normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
-}
-
 function filtrarItensNecessarios(itens) {
-  return itens.filter(item => item.produto?.sku?.toUpperCase().includes('PEDIDO'));
+  return itens.filter(item =>
+    item.produto?.sku?.toUpperCase().includes('PEDIDO')
+  );
 }
 
 function agruparItensPorMarca(itensComMarca) {
@@ -35,7 +33,7 @@ router.post('/', async (req, res) => {
     const idPedido = req.body?.dados?.id;
     const numeroRecebido = req.body?.dados?.numero;
 
-    console.log(`📅 Webhook recebido: ID ${idPedido}, Número ${numeroRecebido}`);
+    console.log(`📥 Webhook recebido: ID ${idPedido}, Número ${numeroRecebido}`);
 
     if (!idPedido || !numeroRecebido) {
       return res.status(200).json({ mensagem: 'Webhook ignorado: dados incompletos.' });
@@ -97,7 +95,14 @@ router.post('/', async (req, res) => {
         const marca = produto.marca?.nome?.trim();
         if (!marca) continue;
 
-        itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
+        itensEnriquecidos.push({
+          ...item,
+          produto,
+          sku,
+          quantidade,
+          valorUnitario,
+          marca
+        });
         await delay(250);
       } catch (erroProduto) {
         console.error(`❌ Erro ao buscar produto do item:`, erroProduto);
@@ -132,7 +137,11 @@ router.post('/', async (req, res) => {
 
         console.log(`🚚 Enviando OC para fornecedor ${fornecedor.nomeOriginal || fornecedor.nome}`);
         const resposta = await enviarOrdemCompra(payloadOC);
-        resultados.push({ marca, fornecedor: fornecedor.nomeOriginal || fornecedor.nome, status: resposta });
+        resultados.push({
+          marca,
+          fornecedor: fornecedor.nomeOriginal || fornecedor.nome,
+          status: resposta
+        });
 
       } catch (erroItem) {
         console.error(`❌ Erro ao processar grupo da marca ${marca}:`, erroItem);
