@@ -2,84 +2,86 @@ const axios = require('axios');
 
 const BASE_URL = 'https://api.tiny.com.br/api2/fornecedores.pesquisa.php';
 const API_TOKEN = process.env.TINY_API_TOKEN;
+const DELAY_MS = 800;
 
-// Delay para evitar erro 429
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-// Normaliza nome para matching (reutilizável em toda a IA)
+// 🧹 Normaliza o nome do fornecedor para comparação
 function normalizarFornecedor(nome) {
   return nome
     ?.normalize('NFD')
-    .replace(/[̀-ͯ]/g, '') // remove acentos
-    .replace(/[^a-zA-Z0-9\s]/g, '') // remove símbolos
-    .replace(/\b(FORNECEDOR|LTDA|ME|URGENTE)\b/gi, '') // remove palavras comuns
-    .replace(/\s+/g, ' ') // normaliza espaços
+    .replace(/[\u0300-\u036f]/g, '')  // Remove acentos
+    .replace(/[^a-zA-Z0-9\s]/g, '')  // Remove símbolos
+    .replace(/\b(FORNECEDOR|LTDA|ME|URGENTE)\b/gi, '')  // Remove ruídos
+    .replace(/\s+/g, ' ')  // Normaliza espaços
     .trim()
     .toLowerCase();
 }
 
 async function listarTodosFornecedores() {
-  const fornecedoresMap = new Map();
-  const delayEntreRequisicoes = 800;
-
+  const fornecedoresMap = new Map(); // Para evitar duplicatas
+  const fornecedoresIgnorados = [];
   let pagina = 1;
-  let totalBruto = 0;
-  let comNomePadrao = 0;
-  const foraDoPadrao = [];
+  let totalBuscados = 0;
 
   while (true) {
+    const url = `${BASE_URL}?token=${API_TOKEN}&formato=json&pagina=${pagina}&tipo=J`;
+
     try {
-      const url = `${BASE_URL}?token=${API_TOKEN}&formato=json&pagina=${pagina}&tipo=J`;
       const response = await axios.get(url);
       const lista = response.data?.retorno?.fornecedores || [];
+
+      console.log(`📄 Página ${pagina}: ${lista.length} fornecedores`);
 
       if (lista.length === 0) break;
 
       for (const item of lista) {
         const f = item?.fornecedor;
-        if (f?.id && f?.nome && f?.tipoPessoa === 'J') {
-          totalBruto++;
+        if (!f?.id || !f?.nome || f?.tipoPessoa !== 'J') continue;
 
-          const nomeOriginal = f.nome;
-          const nomeNormalizado = normalizarFornecedor(nomeOriginal);
+        totalBuscados++;
 
-          if (nomeOriginal.toUpperCase().startsWith('FORNECEDOR ')) {
-            comNomePadrao++;
-          } else {
-            foraDoPadrao.push({ id: f.id, nome: nomeOriginal });
+        const nomeUpper = f.nome.toUpperCase();
+        const jaExiste = fornecedoresMap.has(f.id);
+
+        if (nomeUpper.startsWith('FORNECEDOR ')) {
+          if (!jaExiste) {
+            fornecedoresMap.set(f.id, {
+              id: f.id,
+              nomeOriginal: f.nome,
+              nomeNormalizado: normalizarFornecedor(f.nome)
+            });
           }
-
-          fornecedoresMap.set(f.id, {
+        } else {
+          fornecedoresIgnorados.push({
             id: f.id,
-            nomeOriginal,
-            nomeNormalizado
+            nome: f.nome
           });
         }
       }
 
-      const ultimaPagina = response.data?.retorno?.pagina?.ultima === "true";
+      const ultimaPagina = response.data?.retorno?.pagina?.ultima === 'true';
       if (ultimaPagina) break;
 
       pagina++;
-      await delay(delayEntreRequisicoes);
-    } catch (error) {
-      console.error(`[listarTodosFornecedores] Erro na página ${pagina}:`, error.response?.data || error.message);
+      await new Promise(res => setTimeout(res, DELAY_MS));
+
+    } catch (err) {
+      console.error(`[listarTodosFornecedores] Erro na página ${pagina}:`, err.message);
       break;
     }
   }
 
-  const fornecedores = Array.from(fornecedoresMap.values());
+  const fornecedoresValidos = Array.from(fornecedoresMap.values());
 
-  console.log(`📦 Total PJ recebidos da Tiny (bruto): ${totalBruto}`);
-  console.log(`✅ Com nome padrão \"FORNECEDOR ...\": ${comNomePadrao}`);
-  console.log(`🚫 Fora do padrão (mantidos para IA/heurística): ${foraDoPadrao.length}`);
+  console.log(`📦 Total bruto recebido: ${totalBuscados}`);
+  console.log(`✅ Fornecedores válidos (com prefixo "FORNECEDOR "): ${fornecedoresValidos.length}`);
+  console.log(`🚫 Ignorados por nome fora do padrão: ${fornecedoresIgnorados.length}`);
 
-  if (foraDoPadrao.length > 0) {
-    console.log('📋 Exemplos de nomes fora do padrão:');
-    console.table(foraDoPadrao.slice(0, 10));
+  if (fornecedoresIgnorados.length > 0) {
+    console.log('📋 Exemplos de ignorados:');
+    console.table(fornecedoresIgnorados.slice(0, 5));
   }
 
-  return fornecedores;
+  return fornecedoresValidos;
 }
 
 module.exports = {
