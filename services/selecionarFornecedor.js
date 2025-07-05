@@ -1,5 +1,5 @@
 const { analisarPedidoViaIA } = require('./openaiMarcaService');
-const { normalizarFornecedor } = require('./tinyFornecedorService'); // reuso opcional se necessário
+const { normalizarFornecedor } = require('./tinyFornecedorService');
 
 async function selecionarFornecedor(marca, sku, listaFornecedores) {
   if (!marca || !sku || !Array.isArray(listaFornecedores)) {
@@ -37,6 +37,9 @@ async function selecionarFornecedor(marca, sku, listaFornecedores) {
     if (respostaIA?.deveGerarOC && typeof respostaIA.idFornecedor === 'number') {
       const viaIA = listaFornecedores.find(f => f.id === respostaIA.idFornecedor);
       if (viaIA) {
+        if (viaIA.nomeOriginal !== respostaIA.nomeFornecedor) {
+          console.warn(`[IA] Inconsistência nome/ID: esperado "${viaIA.nomeOriginal}" mas IA retornou "${respostaIA.nomeFornecedor}"`);
+        }
         console.log(`[MATCH IA] SKU: ${sku} → ${viaIA.nomeOriginal}`);
         return viaIA;
       }
