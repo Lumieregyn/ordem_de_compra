@@ -1,58 +1,61 @@
-const { analisarPedidoViaIA } = require('./openaiMarcaService');
-const { normalizarFornecedor } = require('./tinyFornecedorService');
+const axios = require('axios');
+const { getAccessToken } = require('./tokenService');
 
-async function selecionarFornecedor(marca, sku, listaFornecedores) {
-  if (!marca || !sku || !Array.isArray(listaFornecedores)) {
-    console.warn('[selecionarFornecedor] Dados inválidos');
-    return null;
-  }
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const MAX_PAGINAS = 10;
 
-  const marcaNormalizada = normalizarFornecedor(marca);
+function normalizarFornecedor(nome) {
+  return nome
+    ?.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9\s]/g, '')
+    .replace(/\b(FORNECEDOR|LTDA|ME|URGENTE)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
 
-  // 1. Match direto (nome exato)
-  const direto = listaFornecedores.find(f => f.nomeNormalizado === marcaNormalizada);
-  if (direto) {
-    console.log(`[MATCH DIRETO] SKU: ${sku} → ${direto.nomeOriginal}`);
-    return direto;
-  }
+async function listarTodosFornecedores() {
+  const token = await getAccessToken();
+  if (!token) return [];
 
-  // 2. Match heurístico (contém)
-  const heuristico = listaFornecedores.find(f =>
-    f.nomeNormalizado.includes(marcaNormalizada) ||
-    marcaNormalizada.includes(f.nomeNormalizado)
-  );
-  if (heuristico) {
-    console.log(`[MATCH HEURÍSTICO] SKU: ${sku} → ${heuristico.nomeOriginal}`);
-    return heuristico;
-  }
+  const todos = [];
+  let page = 1;
+  const limit = 50;
 
-  // 3. IA fallback
   try {
-    const respostaIA = await analisarPedidoViaIA({
-      produtoSKU: sku,
-      marca,
-      fornecedores: listaFornecedores
-    });
+    while (page <= MAX_PAGINAS) {
+      const response = await axios.get(`https://erp.tiny.com.br/public-api/v3/contatos?tipo=J&page=${page}&limit=${limit}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
-    if (respostaIA?.deveGerarOC && typeof respostaIA.idFornecedor === 'number') {
-      const viaIA = listaFornecedores.find(f => f.id === respostaIA.idFornecedor);
-      if (viaIA) {
-        if (viaIA.nomeOriginal !== respostaIA.nomeFornecedor) {
-          console.warn(`[IA] Inconsistência nome/ID: esperado "${viaIA.nomeOriginal}" mas IA retornou "${respostaIA.nomeFornecedor}"`);
-        }
-        console.log(`[MATCH IA] SKU: ${sku} → ${viaIA.nomeOriginal}`);
-        return viaIA;
-      }
+      const contatosPagina = response.data.itens || [];
+      if (!contatosPagina.length) break;
+
+      todos.push(...contatosPagina);
+      page++;
+      await delay(500);
     }
 
-    console.warn(`[IA] Nenhum fornecedor confiável para SKU ${sku}`);
-    return null;
-  } catch (error) {
-    console.error(`[ERRO IA] ${sku}:`, error.message);
-    return null;
+    const fornecedoresValidos = todos.filter(c =>
+      c.nome && normalizarFornecedor(c.nome).includes('fornecedor')
+    ).map(c => ({
+      id: c.id,
+      nomeOriginal: c.nome,
+      nomeNormalizado: normalizarFornecedor(c.nome)
+    }));
+
+    console.log(`📦 Fornecedores PJ encontrados: ${fornecedoresValidos.length}`);
+    console.table(fornecedoresValidos.map(f => ({ id: f.id, nome: f.nomeOriginal })));
+
+    return fornecedoresValidos;
+  } catch (err) {
+    console.error('❌ Erro ao buscar fornecedores:', err.message);
+    return [];
   }
 }
 
 module.exports = {
-  selecionarFornecedor
+  listarTodosFornecedores,
+  normalizarFornecedor
 };
