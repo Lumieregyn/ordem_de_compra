@@ -20,14 +20,14 @@ function normalizarFornecedor(nome) {
 
 async function listarTodosFornecedores() {
   const fornecedoresMap = new Map();
-  const maxPaginas = 20;
   const delayEntreRequisicoes = 800;
 
+  let pagina = 1;
   let totalBruto = 0;
   let comNomePadrao = 0;
   const foraDoPadrao = [];
 
-  for (let pagina = 1; pagina <= maxPaginas; pagina++) {
+  while (true) {
     try {
       const url = `${BASE_URL}?token=${API_TOKEN}&formato=json&pagina=${pagina}&tipo=J`;
       const response = await axios.get(url);
@@ -43,7 +43,6 @@ async function listarTodosFornecedores() {
           const nomeOriginal = f.nome;
           const nomeNormalizado = normalizarFornecedor(nomeOriginal);
 
-          // Conta quantos seguem o padrão FORNECEDOR ...
           if (nomeOriginal.toUpperCase().startsWith('FORNECEDOR ')) {
             comNomePadrao++;
           } else {
@@ -61,6 +60,7 @@ async function listarTodosFornecedores() {
       const ultimaPagina = response.data?.retorno?.pagina?.ultima === "true";
       if (ultimaPagina) break;
 
+      pagina++;
       await delay(delayEntreRequisicoes);
     } catch (error) {
       console.error(`[listarTodosFornecedores] Erro na página ${pagina}:`, error.response?.data || error.message);
@@ -71,7 +71,7 @@ async function listarTodosFornecedores() {
   const fornecedores = Array.from(fornecedoresMap.values());
 
   console.log(`📦 Total PJ recebidos da Tiny (bruto): ${totalBruto}`);
-  console.log(`✅ Com nome padrão "FORNECEDOR ...": ${comNomePadrao}`);
+  console.log(`✅ Com nome padrão \"FORNECEDOR ...\": ${comNomePadrao}`);
   console.log(`🚫 Fora do padrão (mantidos para IA/heurística): ${foraDoPadrao.length}`);
 
   if (foraDoPadrao.length > 0) {
