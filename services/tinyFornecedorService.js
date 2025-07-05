@@ -2,7 +2,6 @@ const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const MAX_PAGINAS = 10;
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 
 /**
@@ -20,6 +19,7 @@ function normalizarFornecedor(nome) {
 
 /**
  * Lista todos os fornecedores Pessoa Jurídica via API V3, sem duplicatas.
+ * Continua paginando até não retornar mais itens.
  * @returns {Promise<Array<{id: number, nomeOriginal: string, nomeNormalizado: string}>>}
  */
 async function listarTodosFornecedores() {
@@ -31,7 +31,7 @@ async function listarTodosFornecedores() {
   const limit = 50;
 
   try {
-    while (page <= MAX_PAGINAS) {
+    while (true) {
       const response = await axios.get(
         `${TINY_API_V3_BASE}/contatos`,
         {
