@@ -1,80 +1,85 @@
 const axios = require('axios');
-const { getAccessToken } = require('./tokenService');
 
-const BASE_URL = 'https://erp.tiny.com.br/public-api/v3';
-const DELAY_MS = 500;
-const PAGE_SIZE = 100;
-const MAX_PAGINAS = Infinity;
+const BASE_URL = 'https://api.tiny.com.br/api2/fornecedores.pesquisa.php';
+const API_TOKEN = process.env.TINY_API_TOKEN;
 
-/**
- * Normaliza nome para uso em matching (sem acentos, símbolos, excessos).
- */
+// Delay para evitar erro 429
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Normaliza nome para matching (reutilizável em toda a IA)
 function normalizarFornecedor(nome) {
   return nome
     ?.normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .replace(/[^a-zA-Z0-9\s]/g, '')
-    .replace(/\b(FORNECEDOR|LTDA|ME|URGENTE)\b/gi, '')
-    .replace(/\s+/g, ' ')
+    .replace(/[̀-ͯ]/g, '') // remove acentos
+    .replace(/[^a-zA-Z0-9\s]/g, '') // remove símbolos
+    .replace(/\b(FORNECEDOR|LTDA|ME|URGENTE)\b/gi, '') // remove palavras comuns
+    .replace(/\s+/g, ' ') // normaliza espaços
     .trim()
     .toLowerCase();
 }
 
-/**
- * Lista todos os fornecedores PJ, sem duplicados, com logs dos fora do padrão.
- */
 async function listarTodosFornecedores() {
-  const token = await getAccessToken();
-  if (!token) return [];
+  const fornecedoresMap = new Map();
+  const maxPaginas = 20;
+  const delayEntreRequisicoes = 800;
 
-  const allContacts = [];
-  let page = 1;
+  let totalBruto = 0;
+  let comNomePadrao = 0;
+  const foraDoPadrao = [];
 
-  try {
-    while (page <= MAX_PAGINAS) {
-      const response = await axios.get(`${BASE_URL}/contatos`, {
-        headers: { Authorization: `Bearer ${token}` },
-        params: { tipo: 'J', page, limit: PAGE_SIZE }
-      });
+  for (let pagina = 1; pagina <= maxPaginas; pagina++) {
+    try {
+      const url = `${BASE_URL}?token=${API_TOKEN}&formato=json&pagina=${pagina}&tipo=J`;
+      const response = await axios.get(url);
+      const lista = response.data?.retorno?.fornecedores || [];
 
-      const pageItems = response.data?.itens || [];
-      if (pageItems.length === 0) break;
+      if (lista.length === 0) break;
 
-      allContacts.push(...pageItems);
-      page++;
-      await new Promise(resolve => setTimeout(resolve, DELAY_MS));
-    }
+      for (const item of lista) {
+        const f = item?.fornecedor;
+        if (f?.id && f?.nome && f?.tipoPessoa === 'J') {
+          totalBruto++;
 
-    // Deduplicar por ID
-    const mapa = new Map();
-    const ignorados = [];
+          const nomeOriginal = f.nome;
+          const nomeNormalizado = normalizarFornecedor(nomeOriginal);
 
-    for (const f of allContacts) {
-      const nomeValido = f.nome?.toUpperCase()?.startsWith('FORNECEDOR ');
-      if (nomeValido) {
-        mapa.set(f.id, {
-          id: f.id,
-          nomeOriginal: f.nome,
-          nomeNormalizado: normalizarFornecedor(f.nome)
-        });
-      } else {
-        ignorados.push({ id: f.id, nome: f.nome });
+          // Conta quantos seguem o padrão FORNECEDOR ...
+          if (nomeOriginal.toUpperCase().startsWith('FORNECEDOR ')) {
+            comNomePadrao++;
+          } else {
+            foraDoPadrao.push({ id: f.id, nome: nomeOriginal });
+          }
+
+          fornecedoresMap.set(f.id, {
+            id: f.id,
+            nomeOriginal,
+            nomeNormalizado
+          });
+        }
       }
-    }
 
-    const validos = Array.from(mapa.values());
-    console.log(`📦 Total fornecedores PJ retornados: ${allContacts.length}`);
-    console.log(`✅ Com nome padrão: ${validos.length}`);
-    console.log(`🚫 Ignorados por nome fora do padrão: ${ignorados.length}`);
-    if (ignorados.length > 0) {
-      console.table(ignorados.slice(0, 10));
-    }
+      const ultimaPagina = response.data?.retorno?.pagina?.ultima === "true";
+      if (ultimaPagina) break;
 
-    return validos;
-  } catch (err) {
-    console.error('❌ Erro ao buscar fornecedores:', err.message || err);
-    return [];
+      await delay(delayEntreRequisicoes);
+    } catch (error) {
+      console.error(`[listarTodosFornecedores] Erro na página ${pagina}:`, error.response?.data || error.message);
+      break;
+    }
   }
+
+  const fornecedores = Array.from(fornecedoresMap.values());
+
+  console.log(`📦 Total PJ recebidos da Tiny (bruto): ${totalBruto}`);
+  console.log(`✅ Com nome padrão "FORNECEDOR ...": ${comNomePadrao}`);
+  console.log(`🚫 Fora do padrão (mantidos para IA/heurística): ${foraDoPadrao.length}`);
+
+  if (foraDoPadrao.length > 0) {
+    console.log('📋 Exemplos de nomes fora do padrão:');
+    console.table(foraDoPadrao.slice(0, 10));
+  }
+
+  return fornecedores;
 }
 
 module.exports = {
