@@ -7,7 +7,7 @@ const MAX_PAGINAS = 30;
 function normalizarFornecedor(nome) {
   return nome
     ?.normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9\s]/g, '')
     .replace(/\b(FORNECEDOR|LTDA|ME|URGENTE|ASSOCIACAO|ASSOCIAÇÃO|CINDY|\+LUZ)\b/gi, '')
     .replace(/\s+/g, ' ')
@@ -36,19 +36,20 @@ async function listarTodosFornecedores() {
       if (!lista.length) break;
 
       for (const f of lista) {
-        if (!f?.id || !f?.nome || f?.tipoPessoa !== 'J') continue;
-
-        // ❗️ NOVO: Ignorar se não tiver CNPJ ou nome não contiver "FORNECEDOR"
+        const nomeOriginal = f.nome?.trim();
         const cnpj = f.cnpj?.replace(/\D/g, '') || f.cpf_cnpj?.replace(/\D/g, '');
-        if (!cnpj || !f.nome.toUpperCase().includes('FORNECEDOR')) continue;
+
+        if (!f?.id || !nomeOriginal || f.tipoPessoa !== 'J' || !cnpj) continue;
+        if (!nomeOriginal.toUpperCase().includes('FORNECEDOR')) continue;
 
         totalBruto++;
 
-        const nomeOriginal = f.nome.trim();
         const nomeNormalizado = normalizarFornecedor(nomeOriginal);
-
-        if (nomeOriginal.toUpperCase().startsWith('FORNECEDOR')) comNomePadrao++;
-        else foraDoPadrao.push({ id: f.id, nome: nomeOriginal });
+        if (nomeOriginal.toUpperCase().startsWith('FORNECEDOR')) {
+          comNomePadrao++;
+        } else {
+          foraDoPadrao.push({ id: f.id, nome: nomeOriginal });
+        }
 
         if (!fornecedoresMap.has(cnpj)) {
           fornecedoresMap.set(cnpj, {
@@ -62,9 +63,6 @@ async function listarTodosFornecedores() {
           });
         }
       }
-
-      const ultimaPagina = response.data?.retorno?.pagina?.ultima === 'true';
-      if (ultimaPagina) break;
 
       await delay(500);
     } catch (err) {
