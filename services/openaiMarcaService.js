@@ -4,7 +4,6 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// 🔍 Inferência de marca a partir de um produto isolado
 async function inferirMarcaViaIA(produto) {
   const prompt = `
 Você é uma IA que analisa dados de produtos de um ERP (Tiny) e tenta inferir a marca do produto com base nos dados disponíveis.
@@ -22,21 +21,54 @@ Responda apenas com o nome da marca inferida. Se não conseguir inferir, respond
       temperature: 0.2,
     });
 
-    const marca = completion.choices[0].message.content.trim();
-    return marca;
+    return completion.choices[0].message.content.trim();
   } catch (err) {
     console.error('❌ Erro na inferência de marca via IA:', err.message);
     return null;
   }
 }
 
-// 🧠 Análise de pedido + fornecedores → IA escolhe fornecedor mais compatível
+function normalizarTexto(txt) {
+  return txt?.normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 async function analisarPedidoViaIA(pedidoContexto, listaFornecedores) {
+  const { marca, produtoSKU, quantidade, valorUnitario, produto } = pedidoContexto || {};
+
+  if (!marca || !produtoSKU || !quantidade || !valorUnitario || !Array.isArray(listaFornecedores) || listaFornecedores.length === 0) {
+    console.warn('⚠️ Dados insuficientes para análise IA:', { pedidoContexto, listaFornecedores });
+    return null;
+  }
+
+  const marcaNorm = normalizarTexto(marca);
+
+  const fornecedoresFiltrados = listaFornecedores
+    .filter(f => {
+      const nomeNorm = normalizarTexto(f?.nomeNormalizado || '');
+      return nomeNorm.includes(marcaNorm) || marcaNorm.includes(nomeNorm);
+    })
+    .slice(0, 10);
+
+  if (fornecedoresFiltrados.length === 0) {
+    console.warn(`⚠️ Nenhum fornecedor compatível com a marca '${marca}' para análise IA.`);
+    console.table(listaFornecedores.map(f => ({ id: f.id, nomeNormalizado: f.nomeNormalizado })));
+    return null;
+  }
+
   const prompt = `
-Você é uma IA que analisa um item de pedido de venda no ERP Tiny. Com base nas informações do produto, quantidade, preço e lista de fornecedores disponíveis, escolha o fornecedor mais compatível com a marca e características do produto.
+Você é uma IA que deve escolher o melhor fornecedor para um item de pedido de venda no ERP Tiny.
 
-Retorne APENAS um JSON com a estrutura abaixo:
+INSTRUÇÕES IMPORTANTES:
+- NÃO explique sua decisão.
+- NÃO forneça comentários.
+- Responda APENAS com um JSON no formato exato abaixo.
+- Se não houver fornecedor compatível, retorne deveGerarOC: false.
 
+FORMATO OBRIGATÓRIO:
 {
   "itens": [
     {
@@ -50,19 +82,25 @@ Retorne APENAS um JSON com a estrutura abaixo:
   ]
 }
 
-### DADOS DO PEDIDO
-Produto:
-${JSON.stringify(pedidoContexto.produto, null, 2)}
+DADOS DO PRODUTO:
+SKU: ${produtoSKU}
+Marca: ${marca}
+Quantidade: ${quantidade}
+Valor unitário: ${valorUnitario}
 
-Quantidade: ${pedidoContexto.quantidade}
-Valor unitário: ${pedidoContexto.valorUnitario}
-Marca detectada: ${pedidoContexto.marca}
-
-### FORNECEDORES DISPONÍVEIS
-${JSON.stringify(listaFornecedores, null, 2)}
+FORNECEDORES DISPONÍVEIS:
+${JSON.stringify(
+  fornecedoresFiltrados.map(f => ({
+    idFornecedor: f.id,
+    nomeFornecedor: f.nomeOriginal
+  })),
+  null,
+  2
+)}
 `;
 
   try {
+    console.log('🤖 IA - Enviando prompt...');
     const completion = await openai.chat.completions.create({
       model: 'gpt-4',
       messages: [{ role: 'user', content: prompt }],
@@ -75,6 +113,11 @@ ${JSON.stringify(listaFornecedores, null, 2)}
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
     const jsonString = text.substring(start, end + 1);
+
+    if (!jsonString) {
+      console.warn('⚠️ Resposta da IA sem JSON válido detectado.');
+      return null;
+    }
 
     return JSON.parse(jsonString);
   } catch (err) {
