@@ -123,8 +123,8 @@ router.post('/', async (req, res) => {
     for (const [marca, itensDaMarca] of Object.entries(agrupadosPorMarca)) {
       try {
         const marcaNorm = normalizarTexto(marca);
-        let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
-          || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
+        let fornecedor = fornecedores.find(f => f.nomeNormalizado === `fornecedor ${marcaNorm}`)
+          || fornecedores.find(f => f.nomeNormalizado.includes(marcaNorm));
 
         if (!fornecedor) {
           const pedidoContexto = {
@@ -167,9 +167,9 @@ router.post('/', async (req, res) => {
           continue;
         }
 
-        console.log(`🚚 Enviando OC para fornecedor ${fornecedor.nome}`);
+        console.log(`🚚 Enviando OC para fornecedor ${fornecedor.nomeOriginal}`);
         const resposta = await enviarOrdemCompra(payloadOC);
-        resultados.push({ marca, fornecedor: fornecedor.nome, status: resposta });
+        resultados.push({ marca, fornecedor: fornecedor.nomeOriginal, status: resposta });
 
       } catch (erroItem) {
         console.error(`❌ Erro ao processar grupo da marca ${marca}:`, erroItem);
