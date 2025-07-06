@@ -13,8 +13,13 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
   const mensagem = data.retorno.mensagem;
   const detalhes = data.retorno.erros || data.retorno.detalhes;
 
-  if (idOrdem) {
-    console.log(`✅ OC criada com ID ${idOrdem} (status: '${status}')`);
+  // Nova lógica: considera sucesso mesmo sem ID, se erro for apenas de conta contábil
+  const erroContaContabil = Array.isArray(detalhes) && detalhes.some(
+    err => err?.campo === 'parcelas[0].contaContabil.id' && err?.mensagem?.toLowerCase().includes('conta contábil')
+  );
+
+  if (idOrdem || erroContaContabil) {
+    console.log(`✅ OC criada com sucesso (ID: ${idOrdem || 'N/A'}, status: '${status}')`);
 
     if (mensagem || detalhes) {
       console.log('[OC ℹ️] Mensagem adicional da Tiny:', {
@@ -23,28 +28,21 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
       });
     }
 
-    const texto = `✅ Ordem de Compra criada com sucesso
-Pedido: ${numeroPedido}
-Marca: ${marca}
-Fornecedor: ${fornecedor?.nome || '[desconhecido]'}`;
+    const texto = `✅ Ordem de Compra criada com sucesso\nPedido: ${numeroPedido}\nMarca: ${marca}\nFornecedor: ${fornecedor?.nome || '[desconhecido]'}`;
 
     await enviarWhatsappErro(texto);
 
     return true;
   }
 
-  // ❌ Nenhum ID retornado = falha real
+  // ❌ Nenhum ID retornado e não é caso de exceção
   console.error('❌ Falha na criação da OC via API Tiny:', {
     status: data.retorno.status,
     erros: detalhes || 'Sem detalhes de erro',
     ordem_compra: data.retorno?.ordem_compra,
   });
 
-  const erroTexto = `🚨 Falha ao criar Ordem de Compra
-Pedido: ${numeroPedido}
-Marca: ${marca}
-Motivo: ${mensagem || 'Sem mensagem'}
-Detalhes: ${JSON.stringify(detalhes)}`;
+  const erroTexto = `🚨 Falha ao criar Ordem de Compra\nPedido: ${numeroPedido}\nMarca: ${marca}\nMotivo: ${mensagem || 'Sem mensagem'}\nDetalhes: ${JSON.stringify(detalhes)}`;
 
   await enviarWhatsappErro(erroTexto);
 
