@@ -13,7 +13,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const pedidosProcessados = new Set();
 
 function normalizarTexto(txt) {
-  return txt?.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
+  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
 }
 
 function filtrarItensNecessarios(itens) {
@@ -71,9 +71,7 @@ router.post('/', async (req, res) => {
 
     if (pedido.situacao !== 3) {
       console.log(`🛑 Pedido ${numeroPedido} ignorado. Situação atual: ${pedido.situacao}`);
-      return res.status(200).json({
-        mensagem: `Pedido ${numeroPedido} com situação ${pedido.situacao} não será processado.`
-      });
+      return res.status(200).json({ mensagem: `Pedido ${numeroPedido} com situação ${pedido.situacao} não será processado.` });
     }
 
     pedidosProcessados.add(idPedido);
@@ -84,7 +82,10 @@ router.post('/', async (req, res) => {
       return res.status(200).json({ mensagem: 'Nenhuma OC será gerada. Itens são de estoque.' });
     }
 
-    const fornecedores = await listarTodosFornecedores();
+    const todos = await listarTodosFornecedores();
+    const fornecedoresDiretos = todos.filter(f => f.nomeOriginal.toUpperCase().startsWith('FORNECEDOR '));
+    const fornecedoresIA = todos.filter(f => !f.nomeOriginal.toUpperCase().startsWith('FORNECEDOR '));
+
     const itensEnriquecidos = [];
 
     for (const item of itensFiltrados) {
@@ -123,10 +124,10 @@ router.post('/', async (req, res) => {
     for (const [marca, itensDaMarca] of Object.entries(agrupadosPorMarca)) {
       try {
         const marcaNorm = normalizarTexto(marca);
-        let fornecedor = fornecedores.find(f => f.nomeNormalizado === `fornecedor ${marcaNorm}`)
-          || fornecedores.find(f => f.nomeNormalizado.includes(marcaNorm));
+        let fornecedor = fornecedoresDiretos.find(f => f.nomeNormalizado === `fornecedor ${marcaNorm}`)
+          || fornecedoresDiretos.find(f => f.nomeNormalizado.includes(marcaNorm));
 
-        if (!fornecedor) {
+        if (!fornecedor && fornecedoresIA.length > 0) {
           const pedidoContexto = {
             marca,
             produtoSKU: itensDaMarca[0]?.sku || '',
@@ -135,16 +136,11 @@ router.post('/', async (req, res) => {
             produto: itensDaMarca[0]?.produto || {}
           };
 
-          if (!Array.isArray(fornecedores) || fornecedores.length === 0) {
-            console.warn(`⚠️ Lista de fornecedores está vazia. Pulando IA para marca ${marca}.`);
-            continue;
-          }
-
           console.log('🤖 IA - Enviando prompt...');
-          const respostaIA = await analisarPedidoViaIA(pedidoContexto, fornecedores);
+          const respostaIA = await analisarPedidoViaIA(pedidoContexto, fornecedoresIA);
 
           if (respostaIA?.itens?.[0]?.deveGerarOC && respostaIA.itens?.[0]?.idFornecedor) {
-            fornecedor = fornecedores.find(f => f.id === respostaIA.itens[0].idFornecedor);
+            fornecedor = todos.find(f => f.id === respostaIA.itens[0].idFornecedor);
           }
         }
 
