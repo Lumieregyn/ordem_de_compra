@@ -145,7 +145,8 @@ router.post('/', async (req, res) => {
         }
 
         if (!fornecedor) {
-          await enviarWhatsappErro(`🚨 Ordem de Compra não criada\nPedido: ${numeroPedido}\nMarca: ${marca}\n⚠️ Nenhum fornecedor identificado\n\nFavor ajustar o fornecedor e gerar a OC manualmente.`);
+          const skus = itensDaMarca.map(i => i.sku).join(', ');
+          await enviarWhatsappErro(`🚨 Ordem de Compra não criada\nPedido: ${numeroPedido}\nMarca: ${marca}\nSKUs: ${skus}\n⚠️ Nenhum fornecedor identificado\n\nFavor ajustar o fornecedor e gerar a OC manualmente.`);
           continue;
         }
 
@@ -165,6 +166,11 @@ router.post('/', async (req, res) => {
         const resposta = await enviarOrdemCompra(payloadOC);
 
         const sucesso = await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
+
+        if (sucesso) {
+          await enviarWhatsappErro(`✅ Ordem de Compra criada com sucesso\nPedido: ${numeroPedido}\nMarca: ${marca}\nFornecedor: ${fornecedor.nome}`);
+        }
+
         resultados.push({ marca, fornecedor: fornecedor.nome, status: sucesso ? 'OK' : 'Falha' });
 
       } catch (erroItem) {
