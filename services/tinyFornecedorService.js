@@ -8,48 +8,48 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function normalizarFornecedor(nome) {
   return nome
     ?.normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-zA-Z0-9\s]/g, '')
-    .replace(/\b(FORNECEDOR|LTDA|ME|URGENTE)\b/gi, '')
-    .replace(/\s+/g, ' ')
+    .replace(/[̀-ͯ]/g, '') // remove acentos
+    .replace(/[^a-zA-Z0-9\s]/g, '') // remove símbolos
+    .replace(/\b(FORNECEDOR|LTDA|ME|URGENTE)\b/gi, '') // remove palavras comuns
+    .replace(/\s+/g, ' ') // normaliza espaços
     .trim()
     .toLowerCase();
 }
 
 async function listarTodosFornecedores() {
-  const fornecedoresPorNome = new Map();
-  const delayEntreRequisicoes = 800;
+  const fornecedoresMap = new Map();
+  const maxPaginas = 30;
+  const delayEntreRequisicoes = 700;
 
   let totalBruto = 0;
   let comNomePadrao = 0;
   const foraDoPadrao = [];
 
-  for (let pagina = 1; pagina <= 100; pagina++) {
+  for (let pagina = 1; pagina <= maxPaginas; pagina++) {
     try {
-      const url = `${BASE_URL}?token=${API_TOKEN}&formato=json&pagina=${pagina}&tipo=J`;
+      const url = `${BASE_URL}?token=${API_TOKEN}&formato=json&pagina=${pagina}`;
       const response = await axios.get(url);
-
       const lista = response.data?.retorno?.fornecedores || [];
-      if (!lista.length) break;
+
+      console.log(`📄 Página ${pagina} retornou ${lista.length} fornecedores`);
+
+      if (lista.length === 0) break;
 
       for (const item of lista) {
         const f = item?.fornecedor;
-        if (!f?.id || !f?.nome || f?.tipoPessoa !== 'J') continue;
+        if (f?.id && f?.nome && f?.tipoPessoa === 'J') {
+          totalBruto++;
 
-        totalBruto++;
+          const nomeOriginal = f.nome;
+          const nomeNormalizado = normalizarFornecedor(nomeOriginal);
 
-        const nomeOriginal = f.nome;
-        const nomeNormalizado = normalizarFornecedor(nomeOriginal);
+          if (nomeOriginal.toUpperCase().startsWith('FORNECEDOR ')) {
+            comNomePadrao++;
+          } else {
+            foraDoPadrao.push({ id: f.id, nome: nomeOriginal });
+          }
 
-        if (nomeOriginal.toUpperCase().startsWith('FORNECEDOR ')) {
-          comNomePadrao++;
-        } else {
-          foraDoPadrao.push({ id: f.id, nome: nomeOriginal });
-        }
-
-        // ✅ Garante deduplicação por nome normalizado
-        if (!fornecedoresPorNome.has(nomeNormalizado)) {
-          fornecedoresPorNome.set(nomeNormalizado, {
+          fornecedoresMap.set(f.id, {
             id: f.id,
             nomeOriginal,
             nomeNormalizado
@@ -67,15 +67,18 @@ async function listarTodosFornecedores() {
     }
   }
 
-  const fornecedores = Array.from(fornecedoresPorNome.values());
+  const fornecedores = Array.from(fornecedoresMap.values());
 
   console.log(`📦 Total PJ recebidos da Tiny (bruto): ${totalBruto}`);
   console.log(`✅ Com nome padrão "FORNECEDOR ...": ${comNomePadrao}`);
-  console.log(`📉 Total únicos (por nome): ${fornecedores.length}`);
+  console.log(`🚫 Fora do padrão (mantidos para IA/heurística): ${foraDoPadrao.length}`);
+
   if (foraDoPadrao.length > 0) {
-    console.log('📋 Exemplos fora do padrão:');
-    console.table(foraDoPadrao.slice(0, 5));
+    console.log('📋 Exemplos de nomes fora do padrão:');
+    console.table(foraDoPadrao.slice(0, 10));
   }
+
+  console.table(fornecedores.slice(0, 20)); // Mostra os primeiros únicos para conferência
 
   return fornecedores;
 }
