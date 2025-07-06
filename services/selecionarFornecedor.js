@@ -1,5 +1,5 @@
+const { normalizarTexto } = require('./normalizarTexto');
 const { analisarPedidoViaIA } = require('./openaiMarcaService');
-const { normalizarFornecedor } = require('./tinyFornecedorService'); // reuso opcional se necessário
 
 async function selecionarFornecedor(marca, sku, listaFornecedores) {
   if (!marca || !sku || !Array.isArray(listaFornecedores)) {
@@ -7,24 +7,24 @@ async function selecionarFornecedor(marca, sku, listaFornecedores) {
     return null;
   }
 
-  const marcaNormalizada = normalizarFornecedor(marca);
+  const marcaNormalizada = normalizarTexto(marca);
+  const nomeExato = `fornecedor ${marcaNormalizada}`;
 
-  // 1. Match direto (nome exato)
-  const direto = listaFornecedores.find(f => f.nomeNormalizado === marcaNormalizada);
-  if (direto) {
-    console.log(`[MATCH DIRETO] SKU: ${sku} → ${direto.nomeOriginal}`);
-    return direto;
-  }
-
-  // 2. Match heurístico (contém)
-  const heuristico = listaFornecedores.find(f =>
-    f.nomeNormalizado.includes(marcaNormalizada) ||
-    marcaNormalizada.includes(f.nomeNormalizado)
+  // 1. Match direto
+  const direto = listaFornecedores.find(f => 
+    normalizarTexto(f.nome) === nomeExato
   );
-  if (heuristico) {
-    console.log(`[MATCH HEURÍSTICO] SKU: ${sku} → ${heuristico.nomeOriginal}`);
-    return heuristico;
-  }
+  if (direto) return direto;
+
+  // 2. Match heurístico
+  const heuristico = listaFornecedores.find(f => {
+    const nomeFornecedor = normalizarTexto(f.nome.replace('fornecedor', '').trim());
+    return (
+      nomeFornecedor.includes(marcaNormalizada) ||
+      marcaNormalizada.includes(nomeFornecedor)
+    );
+  });
+  if (heuristico) return heuristico;
 
   // 3. IA fallback
   try {
@@ -36,10 +36,7 @@ async function selecionarFornecedor(marca, sku, listaFornecedores) {
 
     if (respostaIA?.deveGerarOC && typeof respostaIA.idFornecedor === 'number') {
       const viaIA = listaFornecedores.find(f => f.id === respostaIA.idFornecedor);
-      if (viaIA) {
-        console.log(`[MATCH IA] SKU: ${sku} → ${viaIA.nomeOriginal}`);
-        return viaIA;
-      }
+      if (viaIA) return viaIA;
     }
 
     console.warn(`[IA] Nenhum fornecedor confiável para SKU ${sku}`);

@@ -23,12 +23,6 @@ function gerarPayloadOrdemCompra(dados) {
     ? dataPrevista
     : new Date().toISOString().split('T')[0];
 
-  // 🔐 Conta contábil obrigatória
-  const contaContabilId = process.env.TINY_CONTA_CONTABIL_ID;
-  if (!contaContabilId) {
-    console.warn('⚠️ Conta contábil não definida no .env (TINY_CONTA_CONTABIL_ID)');
-  }
-
   // 🎯 Validar e montar os itens
   const itensValidos = itens
     .filter(item => item?.produto?.id && item?.quantidade && item?.valorUnitario)
@@ -56,8 +50,7 @@ function gerarPayloadOrdemCompra(dados) {
     dias: 30,
     valor: Number(valorTotal),
     meioPagamento: "1",
-    observacoes: "Pagamento único",
-    ...(contaContabilId && { contaContabil: { id: Number(contaContabilId) } })
+    observacoes: "Pagamento único"
   };
 
   // 🧾 Observações padronizadas
