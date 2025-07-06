@@ -8,10 +8,10 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 function normalizarFornecedor(nome) {
   return nome
     ?.normalize('NFD')
-    .replace(/[̀-ͯ]/g, '') // remove acentos
-    .replace(/[^a-zA-Z0-9\s]/g, '') // remove símbolos
-    .replace(/\b(FORNECEDOR|LTDA|ME|URGENTE)\b/gi, '') // remove palavras comuns
-    .replace(/\s+/g, ' ') // normaliza espaços
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9\s]/g, '')
+    .replace(/\b(FORNECEDOR|LTDA|ME|URGENTE)\b/gi, '')
+    .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
 }
@@ -78,7 +78,7 @@ async function listarTodosFornecedores() {
     console.table(foraDoPadrao.slice(0, 10));
   }
 
-  console.table(fornecedores.slice(0, 20)); // Mostra os primeiros únicos para conferência
+  console.table(fornecedores.slice(0, 20));
 
   return fornecedores;
 }
