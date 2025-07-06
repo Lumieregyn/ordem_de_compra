@@ -24,15 +24,17 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
     detalhes = [];
   }
 
-  // Sucesso se tiver ID da ordem OU erro específico de conta contábil
-  const erroSomenteContaContabil = detalhes.length > 0 && detalhes.every(
-    err => err?.campo === 'parcelas[0].contaContabil.id'
+  // Sucesso se tiver ID da ordem OU qualquer erro mencionando conta contábil
+  const erroContaContabil = detalhes.some(
+    err =>
+      (err?.campo?.toLowerCase().includes('conta') || '') &&
+      (err?.mensagem?.toLowerCase().includes('conta contábil') || '')
   );
 
-  if (idOrdem || erroSomenteContaContabil) {
+  if (idOrdem || erroContaContabil) {
     console.log(`✅ OC criada com sucesso (ID: ${idOrdem || 'N/A'}, status: '${status}')`);
 
-    if (erroSomenteContaContabil && !idOrdem) {
+    if (erroContaContabil && !idOrdem) {
       console.log('⚠️ Ignorando erro de conta contábil como falso positivo (OC criada).');
     }
 
