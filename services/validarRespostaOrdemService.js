@@ -1,8 +1,10 @@
-// services/validarRespostaOrdemService.js
+const { enviarWhatsappErro } = require('./whatsAppService');
 
-function validarRespostaOrdem(data) {
+async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
   if (!data || !data.retorno) {
     console.error('❌ Resposta inválida da API Tiny: estrutura ausente');
+
+    await enviarWhatsappErro(`🚨 Erro na resposta da API Tiny\nPedido: ${numeroPedido}\nMarca: ${marca}\nMotivo: Estrutura ausente`);
     return false;
   }
 
@@ -11,11 +13,9 @@ function validarRespostaOrdem(data) {
   const mensagem = data.retorno.mensagem;
   const detalhes = data.retorno.erros || data.retorno.detalhes;
 
-  // ✅ Considera sucesso se o ID da OC estiver presente, mesmo com status "erro"
   if (idOrdem) {
     console.log(`✅ OC criada com ID ${idOrdem} (status: '${status}')`);
 
-    // 📝 Log adicional de mensagem ou detalhes
     if (mensagem || detalhes) {
       console.log('[OC ℹ️] Mensagem adicional da Tiny:', {
         mensagem,
@@ -23,15 +23,30 @@ function validarRespostaOrdem(data) {
       });
     }
 
+    const texto = `✅ Ordem de Compra criada com sucesso
+Pedido: ${numeroPedido}
+Marca: ${marca}
+Fornecedor: ${fornecedor?.nome || '[desconhecido]'}`;
+
+    await enviarWhatsappErro(texto);
+
     return true;
   }
 
-  // ❌ Nenhum ID retornado = erro real
+  // ❌ Nenhum ID retornado = falha real
   console.error('❌ Falha na criação da OC via API Tiny:', {
     status: data.retorno.status,
-    erros: data.retorno?.erros || 'Sem detalhes de erro',
+    erros: detalhes || 'Sem detalhes de erro',
     ordem_compra: data.retorno?.ordem_compra,
   });
+
+  const erroTexto = `🚨 Falha ao criar Ordem de Compra
+Pedido: ${numeroPedido}
+Marca: ${marca}
+Motivo: ${mensagem || 'Sem mensagem'}
+Detalhes: ${JSON.stringify(detalhes)}`;
+
+  await enviarWhatsappErro(erroTexto);
 
   return false;
 }
