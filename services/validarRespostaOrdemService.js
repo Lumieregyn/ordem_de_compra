@@ -1,12 +1,10 @@
 const { enviarWhatsappErro } = require('./whatsAppService');
+const { Configuration, OpenAIApi } = require('openai');
+
+const configuration = new Configuration({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAIApi(configuration);
 
 async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
-  console.log('[DEBUG validarRespostaOrdem] Dados recebidos:', {
-    numeroPedido,
-    marca,
-    fornecedorNome: fornecedor?.nome || 'undefined'
-  });
-
   const detalhesRaw = data?.retorno?.erros || data?.retorno?.detalhes;
   let detalhes = [];
 
@@ -20,22 +18,39 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
   const status = data?.retorno?.status;
   const mensagem = data?.retorno?.mensagem;
 
-  const erroSomenteContaContabil = detalhes.length > 0 && detalhes.every(
-    err => err?.campo === 'parcelas[0].contaContabil.id'
-  );
+  // IA decide se deve considerar sucesso
+  const prompt = `Análise da resposta da API Tiny:
+Pedido: ${numeroPedido}
+Marca: ${marca}
+ID OC: ${idOrdem || 'N/A'}
+Status: ${status}
+Mensagem: ${mensagem || 'Nenhuma'}
+Detalhes: ${JSON.stringify(detalhes)}
 
-  if (idOrdem || erroSomenteContaContabil) {
-    console.log(`✅ OC criada com sucesso (ID: ${idOrdem || 'N/A'}, status: '${status}')`);
+Se a Ordem de Compra foi de fato criada com sucesso (mesmo que contenha erros de validação como conta contábil ausente), responda apenas "SIM". Caso contrário, responda "NAO".`;
 
-    if (erroSomenteContaContabil && !idOrdem) {
-      console.log('⚠️ Ignorando erro de conta contábil como falso positivo (OC criada).');
-    }
+  let decisaoIA = 'NAO';
+  try {
+    const completion = await openai.createCompletion({
+      model: 'gpt-3.5-turbo-instruct',
+      prompt,
+      max_tokens: 5,
+      temperature: 0
+    });
 
-    if (mensagem || detalhes.length > 0) {
-      console.log('[OC ℹ️] Mensagem adicional da Tiny:', { mensagem, detalhes });
-    }
+    decisaoIA = completion.data.choices[0].text.trim().toUpperCase();
+  } catch (e) {
+    console.warn('⚠️ Falha ao consultar IA para decidir status da OC:', e.message);
+  }
 
-    const texto = `✅ Ordem de Compra criada com sucesso\nPedido: ${numeroPedido || 'sem número'}\nMarca: ${marca || 'sem marca'}\nFornecedor: ${fornecedor?.nome || 'sem fornecedor'}`;
+  const sucesso = idOrdem || decisaoIA === 'SIM';
+
+  if (sucesso) {
+    console.log(`✅ OC considerada criada com sucesso (ID: ${idOrdem || 'N/A'}, status: '${status}')`);
+    const texto = `✅ Ordem de Compra criada com sucesso
+Pedido: ${numeroPedido || '[indefinido]'}
+Marca: ${marca || '[indefinida]'}
+Fornecedor: ${fornecedor?.nome || '[desconhecido]'}`;
 
     try {
       await enviarWhatsappErro(texto);
@@ -46,25 +61,19 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
     return true;
   }
 
-  if (!data || !data.retorno) {
-    const erroCampoContabil = detalhes.some(e => e?.campo === 'parcelas[0].contaContabil.id');
-    if (!erroCampoContabil) {
-      console.error('❌ Resposta inválida da API Tiny: estrutura ausente');
-      await enviarWhatsappErro(`🚨 Erro na resposta da API Tiny\nPedido: ${numeroPedido || 'sem número'}\nMarca: ${marca || 'sem marca'}\nMotivo: Estrutura ausente`);
-    }
-    return false;
-  }
-
   console.error('❌ Falha na criação da OC via API Tiny:', {
-    status: status,
+    status,
     erros: detalhes.length > 0 ? detalhes : 'Sem detalhes de erro',
-    ordem_compra: data.retorno?.ordem_compra,
+    ordem_compra: data?.retorno?.ordem_compra,
   });
 
-  const erroTexto = `🚨 Falha ao criar Ordem de Compra\nPedido: ${numeroPedido || 'sem número'}\nMarca: ${marca || 'sem marca'}\nMotivo: ${mensagem || 'Sem mensagem'}\nDetalhes: ${JSON.stringify(detalhes)}`;
+  const erroTexto = `🚨 Falha ao criar Ordem de Compra
+Pedido: ${numeroPedido || '[indefinido]'}
+Marca: ${marca || '[indefinida]'}
+Motivo: ${mensagem || 'Sem mensagem'}
+Detalhes: ${JSON.stringify(detalhes)}`;
 
   await enviarWhatsappErro(erroTexto);
-
   return false;
 }
 
