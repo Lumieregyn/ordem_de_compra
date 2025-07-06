@@ -42,7 +42,7 @@ async function listarTodosFornecedores() {
 
   try {
     while (page <= MAX_PAGINAS) {
-      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=J&page=${page}&limit=${limit}`, {
+      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=J&nome=FORNECEDOR&page=${page}&limit=${limit}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -54,17 +54,7 @@ async function listarTodosFornecedores() {
       await delay(500);
     }
 
-    const fornecedoresValidos = todos.filter(c =>
-      c.nome && normalizarTexto(c.nome).includes('fornecedor')
-    );
-
-    console.log(`📦 Fornecedores PJ encontrados: ${fornecedoresValidos.length}`);
-    console.table(fornecedoresValidos.map(f => ({
-      id: f.id,
-      nome: f.nome
-    })));
-
-    return fornecedoresValidos;
+    return Array.from(new Map(todos.map(f => [f.id, f])).values());
   } catch (err) {
     console.error('❌ Erro ao buscar fornecedores:', err.message);
     return [];
@@ -95,19 +85,13 @@ router.post('/', async (req, res) => {
     }
 
     const pedido = await getPedidoCompletoById(idPedido);
+    console.log('📦 DEBUG - Pedido completo recebido da Tiny:', JSON.stringify(pedido, null, 2));
+
     const numeroPedido = pedido?.numeroPedido || '[sem número]';
 
     if (!pedido || !pedido.id || !pedido.numeroPedido || pedido.situacao === undefined) {
       console.warn(`⚠️ Pedido ${numeroPedido} carregado sem campos essenciais.`);
       return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
-    }
-
-    const dataPedido = new Date(pedido.dataPedido || pedido.data || '');
-    const hoje = new Date();
-    const diffDias = Math.floor((hoje - dataPedido) / (1000 * 60 * 60 * 24));
-    if (diffDias > 30) {
-      console.log(`🛑 Pedido ${numeroPedido} ignorado. Data muito antiga (${diffDias} dias atrás).`);
-      return res.status(200).json({ mensagem: 'Pedido antigo demais. Ignorado.' });
     }
 
     if (pedido.situacao !== 3) {
@@ -137,14 +121,7 @@ router.post('/', async (req, res) => {
         if (!produtoId) continue;
 
         console.log(`🔍 Buscando produto ${produtoId}`);
-        let produto = await getProdutoFromTinyV3(produtoId);
-
-        if (!produto) {
-          console.warn(`⚠️ Retentando produto ID ${produtoId}...`);
-          await delay(3000);
-          produto = await getProdutoFromTinyV3(produtoId);
-        }
-
+        const produto = await getProdutoFromTinyV3(produtoId);
         if (!produto) continue;
 
         const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
@@ -152,7 +129,6 @@ router.post('/', async (req, res) => {
         if (!marca) continue;
 
         itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
-        await delay(250);
       } catch (erroProduto) {
         console.error(`❌ Erro ao buscar produto do item:`, erroProduto);
       }
@@ -168,24 +144,9 @@ router.post('/', async (req, res) => {
           || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
 
         if (!fornecedor) {
-          const pedidoContexto = {
-            marca,
-            produtoSKU: itensDaMarca[0]?.sku || '',
-            quantidade: itensDaMarca[0]?.quantidade || 1,
-            valorUnitario: itensDaMarca[0]?.valorUnitario || 0,
-            produto: itensDaMarca[0]?.produto || {}
-          };
-
-          if (!Array.isArray(fornecedores) || fornecedores.length === 0) {
-            console.warn(`⚠️ Lista de fornecedores está vazia. Pulando IA para marca ${marca}.`);
-            continue;
-          }
-
-          console.log('🤖 IA - Enviando prompt...');
-          const respostaIA = await analisarPedidoViaIA(pedidoContexto, fornecedores);
-
-          if (respostaIA?.itens?.[0]?.deveGerarOC && respostaIA.itens?.[0]?.idFornecedor) {
-            fornecedor = fornecedores.find(f => f.id === respostaIA.itens[0].idFornecedor);
+          const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
+          if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
+            fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
           }
         }
 
@@ -221,7 +182,7 @@ router.post('/', async (req, res) => {
     return res.status(200).json({ mensagem: 'OC(s) processada(s)', resultados });
 
   } catch (err) {
-    console.error('❌ Erro geral no webhook:', err);
+    console.error('❌ Erro geral no webhook:', err); // <- LOG COMPLETO DO ERRO
     return res.status(500).json({ erro: 'Erro interno no processamento do webhook.' });
   }
 });

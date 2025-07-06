@@ -58,7 +58,7 @@ async function listarProdutosTiny() {
   }
 }
 
-// 🔍 Consulta individual de produto via ID no Tiny ERP (API v3) com retry para erro 429
+// 🔍 Consulta individual de produto via ID no Tiny ERP (API v3)
 async function getProdutoFromTinyV3(produtoId) {
   console.log(`🔍 Buscando produto ID: ${produtoId}`);
 
@@ -75,43 +75,32 @@ async function getProdutoFromTinyV3(produtoId) {
   }
 
   const url = `https://erp.tiny.com.br/public-api/v3/produtos/${produtoId}`;
-  const maxTentativas = 5;
 
-  for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
-    try {
-      const response = await axios.get(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.status !== 200) {
-        console.error(`❌ Resposta inesperada da API (Status: ${response.status})`);
-        return null;
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
       }
+    });
 
-      console.log(`✅ Produto ID ${produtoId} carregado com sucesso`);
-      return response.data;
-
-    } catch (error) {
-      const status = error.response?.status;
-      const msg = error.response?.data || error.message;
-
-      if (status === 429 && tentativa < maxTentativas) {
-        const espera = 500 * Math.pow(2, tentativa); // backoff exponencial
-        console.warn(`⏳ Tentativa ${tentativa} falhou com 429. Aguardando ${espera}ms antes de tentar novamente.`);
-        await new Promise((res) => setTimeout(res, espera));
-      } else {
-        console.error(`❌ Erro ao buscar produto ID ${produtoId} (Status: ${status}):`);
-        console.error(msg);
-        return null;
-      }
+    if (response.status !== 200) {
+      console.error(`❌ Resposta inesperada da API (Status: ${response.status})`);
+      return null;
     }
-  }
 
-  console.error(`❌ Erro 429 persistente após ${maxTentativas} tentativas ao buscar produto ${produtoId}`);
-  return null;
+    console.log(`✅ Produto ID ${produtoId} carregado com sucesso`);
+    return response.data;
+
+  } catch (error) {
+    const status = error.response?.status;
+    const msg = error.response?.data || error.message;
+
+    console.error(`❌ Erro ao buscar produto ID ${produtoId} (Status: ${status}):`);
+    console.error(msg);
+
+    return null;
+  }
 }
 
 module.exports = {
