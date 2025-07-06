@@ -1,9 +1,10 @@
 const axios = require('axios');
+const { getAccessToken } = require('./tokenService');
 
-const BASE_URL = 'https://api.tiny.com.br/api2/fornecedores.pesquisa.php';
-const API_TOKEN = process.env.TINY_API_TOKEN;
-
+const BASE_URL = 'https://erp.tiny.com.br/public-api/v3/contatos';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const PAGE_LIMIT = 50;
+const MAX_PAGINAS = 30;
 
 function normalizarFornecedor(nome) {
   return nome
@@ -17,27 +18,34 @@ function normalizarFornecedor(nome) {
 }
 
 async function listarTodosFornecedores() {
-  const fornecedoresMap = new Map();
-  const maxPaginas = 30;
-  const delayEntreRequisicoes = 700;
+  const token = await getAccessToken();
+  if (!token) throw new Error('Token de acesso não disponível');
 
+  const fornecedoresMap = new Map();
   let totalBruto = 0;
   let comNomePadrao = 0;
   const foraDoPadrao = [];
 
-  for (let pagina = 1; pagina <= maxPaginas; pagina++) {
+  for (let page = 1; page <= MAX_PAGINAS; page++) {
     try {
-      const url = `${BASE_URL}?token=${API_TOKEN}&formato=json&pagina=${pagina}`;
-      const response = await axios.get(url);
-      const lista = response.data?.retorno?.fornecedores || [];
+      const response = await axios.get(BASE_URL, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        params: {
+          tipo: 'J',
+          page,
+          limit: PAGE_LIMIT
+        }
+      });
 
-      console.log(`📄 Página ${pagina} retornou ${lista.length} fornecedores`);
+      const lista = response.data?.itens || [];
+      console.log(`📄 Página ${page} retornou ${lista.length} fornecedores`);
 
       if (lista.length === 0) break;
 
-      for (const item of lista) {
-        const f = item?.fornecedor;
-        if (f?.id && f?.nome && f?.tipoPessoa === 'J') {
+      for (const f of lista) {
+        if (f?.id && f?.nome) {
           totalBruto++;
 
           const nomeOriginal = f.nome;
@@ -57,12 +65,9 @@ async function listarTodosFornecedores() {
         }
       }
 
-      const ultimaPagina = response.data?.retorno?.pagina?.ultima === 'true';
-      if (ultimaPagina) break;
-
-      await delay(delayEntreRequisicoes);
+      await delay(700);
     } catch (error) {
-      console.error(`[listarTodosFornecedores] Erro na página ${pagina}:`, error.response?.data || error.message);
+      console.error(`[listarTodosFornecedores] Erro na página ${page}:`, error.response?.data || error.message);
       break;
     }
   }
