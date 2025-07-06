@@ -7,15 +7,13 @@ const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
 const { getPedidoCompletoById } = require('../services/tinyPedidoService');
-const axios = require('axios');
+const { listarTodosFornecedores } = require('../services/tinyFornecedorService');
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const pedidosProcessados = new Set();
-const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
-const MAX_PAGINAS = 10;
 
 function normalizarTexto(txt) {
-  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
+  return txt?.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
 }
 
 function filtrarItensNecessarios(itens) {
@@ -30,45 +28,6 @@ function agruparItensPorMarca(itensComMarca) {
     grupos[marca].push(item);
   }
   return grupos;
-}
-
-async function listarTodosFornecedores() {
-  const token = await getAccessToken();
-  if (!token) return [];
-
-  const todos = [];
-  let page = 1;
-  const limit = 50;
-
-  try {
-    while (page <= MAX_PAGINAS) {
-      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=J&page=${page}&limit=${limit}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      const contatosPagina = response.data.itens || [];
-      if (!contatosPagina.length) break;
-
-      todos.push(...contatosPagina);
-      page++;
-      await delay(500);
-    }
-
-    const fornecedoresValidos = todos.filter(c =>
-      c.nome && normalizarTexto(c.nome).includes('fornecedor')
-    );
-
-    console.log(`📦 Fornecedores PJ encontrados: ${fornecedoresValidos.length}`);
-    console.table(fornecedoresValidos.map(f => ({
-      id: f.id,
-      nome: f.nome
-    })));
-
-    return fornecedoresValidos;
-  } catch (err) {
-    console.error('❌ Erro ao buscar fornecedores:', err.message);
-    return [];
-  }
 }
 
 router.post('/', async (req, res) => {
