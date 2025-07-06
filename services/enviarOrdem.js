@@ -1,15 +1,17 @@
 const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
+const { validarRespostaOrdem } = require('./validarRespostaOrdemService');
 
 /**
  * Envia uma Ordem de Compra para a API Tiny v3.
- * Faz validações obrigatórias antes do envio.
- * @param {Object} payload - JSON da ordem de compra (vindo do Bloco 4)
- * @returns {Object|null}
+ * Valida campos obrigatórios antes do envio.
+ * @param {Object} payload - JSON completo da ordem de compra
+ * @returns {Object|null} - Resposta da Tiny ou null em erro crítico
  */
 async function enviarOrdemCompra(payload) {
   const problemas = [];
 
+  // 🔍 Validação de estrutura mínima
   if (!payload) {
     problemas.push('payload ausente');
   } else {
@@ -28,6 +30,7 @@ async function enviarOrdemCompra(payload) {
     }
   }
 
+  // 🚫 Retorna erro se houver problemas detectados
   if (problemas.length > 0) {
     console.warn('[OC ⚠️] Payload incompleto no Bloco 5:', {
       problemas,
@@ -41,11 +44,13 @@ async function enviarOrdemCompra(payload) {
     };
   }
 
+  // 🚀 Envio real para a API Tiny
   try {
     const token = await getAccessToken();
 
     const response = await axios.post(
-      'https://erp.tiny.com.br/public-api/v3/ordens-compra',
+      // 🔧 Endpoint corrigido (evita 404)
+      'https://api.tiny.com.br/public-api/v3/ordens-compra',
       payload,
       {
         headers: {
@@ -58,17 +63,22 @@ async function enviarOrdemCompra(payload) {
 
     const { status, data } = response;
 
-    if (status === 200 && data?.retorno?.status === 'sucesso') {
-      console.log(`[OC ✅] Ordem de Compra criada com sucesso: ID ${data.retorno.ordem_compra.id}`);
-      return data;
+    // ✅ Verifica se a resposta indica sucesso real
+    const sucesso = validarRespostaOrdem(data);
+
+    if (status === 200 && sucesso) {
+      const { id, numero_pedido } = data.retorno.ordem_compra;
+      console.log(`[OC ✅] Ordem de Compra criada com sucesso: ID ${id}, Pedido ${numero_pedido}`);
     } else {
       console.warn('[OC ⚠️] Erro no envio da OC:', {
         status,
         mensagem: data?.mensagem,
-        detalhes: data?.detalhes || data?.retorno?.erros || null,
+        detalhes: data?.detalhes || data?.retorno?.erros || [],
       });
-      return data;
     }
+
+    return data;
+
   } catch (err) {
     console.error('[OC ❌] Erro inesperado ao enviar OC:', err.message);
     return null;
