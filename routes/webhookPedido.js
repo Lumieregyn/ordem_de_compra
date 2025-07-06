@@ -17,7 +17,7 @@ const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 const MAX_PAGINAS = 10;
 
 function normalizarTexto(txt) {
-  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
+  return txt?.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
 }
 
 function filtrarItensNecessarios(itens) {
@@ -132,45 +132,43 @@ router.post('/', async (req, res) => {
     const resultados = [];
 
     for (const [marca, itensDaMarca] of Object.entries(agrupadosPorMarca)) {
+      const marcaNorm = normalizarTexto(marca);
+      let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
+        || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
+
+      if (!fornecedor) {
+        const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
+        if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
+          fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
+        }
+      }
+
+      if (!fornecedor) {
+        const skus = itensDaMarca.map(i => i.sku).join(', ');
+        await enviarWhatsappErro(`🚨 Ordem de Compra não criada\nPedido: ${numeroPedido}\nMarca: ${marca}\nSKUs: ${skus}\n⚠️ Nenhum fornecedor identificado\n\nFavor ajustar o fornecedor e gerar a OC manualmente.`);
+        continue;
+      }
+
+      const payloadOC = gerarPayloadOrdemCompra({
+        numeroPedido: pedido.numeroPedido,
+        nomeCliente: pedido.cliente?.nome || '',
+        dataPrevista: pedido.dataPrevista,
+        itens: itensDaMarca,
+        fornecedor
+      });
+
+      if (!payloadOC || !payloadOC.itens?.length) {
+        await enviarWhatsappErro(`🚨 Payload inválido para OC\nPedido: ${numeroPedido}\nMarca: ${marca}`);
+        continue;
+      }
+
       try {
-        const marcaNorm = normalizarTexto(marca);
-        let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
-          || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
-
-        if (!fornecedor) {
-          const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
-          if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
-            fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
-          }
-        }
-
-        if (!fornecedor) {
-          const skus = itensDaMarca.map(i => i.sku).join(', ');
-          await enviarWhatsappErro(`🚨 Ordem de Compra não criada\nPedido: ${numeroPedido}\nMarca: ${marca}\nSKUs: ${skus}\n⚠️ Nenhum fornecedor identificado\n\nFavor ajustar o fornecedor e gerar a OC manualmente.`);
-          continue;
-        }
-
-        const payloadOC = gerarPayloadOrdemCompra({
-          numeroPedido: pedido.numeroPedido,
-          nomeCliente: pedido.cliente?.nome || '',
-          dataPrevista: pedido.dataPrevista,
-          itens: itensDaMarca,
-          fornecedor
-        });
-
-        if (!payloadOC || !payloadOC.itens?.length) {
-          await enviarWhatsappErro(`🚨 Payload inválido para OC\nPedido: ${numeroPedido}\nMarca: ${marca}`);
-          continue;
-        }
-
         const resposta = await enviarOrdemCompra(payloadOC);
+        const sucesso = await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
 
-        await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
-
-        resultados.push({ marca, fornecedor: fornecedor.nome, status: 'Processado' });
-
-      } catch (erroItem) {
-        await enviarWhatsappErro(`❌ Erro ao processar marca ${marca} no pedido ${numeroPedido}\n${erroItem.message}`);
+        resultados.push({ marca, fornecedor: fornecedor.nome, status: sucesso ? 'OK' : 'Falha' });
+      } catch (erroEnvio) {
+        await enviarWhatsappErro(`❌ Erro ao enviar OC da marca ${marca} no pedido ${numeroPedido}\n${erroEnvio.message}`);
       }
     }
 
