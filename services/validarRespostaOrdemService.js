@@ -4,7 +4,7 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
   if (!data || !data.retorno) {
     console.error('❌ Resposta inválida da API Tiny: estrutura ausente');
 
-    await enviarWhatsappErro(`🚨 Erro na resposta da API Tiny\nPedido: ${numeroPedido}\nMarca: ${marca}\nMotivo: Estrutura ausente`);
+    await enviarWhatsappErro(`🚨 Erro na resposta da API Tiny\nPedido: ${numeroPedido || '[indefinido]'}\nMarca: ${marca || '[indefinida]'}\nMotivo: Estrutura ausente`);
     return false;
   }
 
@@ -15,7 +15,7 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
 
   // Nova lógica: considera sucesso mesmo sem ID, se erro for apenas de conta contábil
   const erroContaContabil = Array.isArray(detalhes) && detalhes.some(
-    err => err?.campo === 'parcelas[0].contaContabil.id' && err?.mensagem?.toLowerCase().includes('conta contábil')
+    err => (err?.campo?.includes('contaContabil') || err?.mensagem?.toLowerCase().includes('conta contábil'))
   );
 
   if (idOrdem || erroContaContabil) {
@@ -28,9 +28,13 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
       });
     }
 
-    const texto = `✅ Ordem de Compra criada com sucesso\nPedido: ${numeroPedido}\nMarca: ${marca}\nFornecedor: ${fornecedor?.nome || '[desconhecido]'}`;
+    const texto = `✅ Ordem de Compra criada com sucesso\nPedido: ${numeroPedido || '[indefinido]'}\nMarca: ${marca || '[indefinida]'}\nFornecedor: ${fornecedor?.nome || '[desconhecido]'}`;
 
-    await enviarWhatsappErro(texto);
+    try {
+      await enviarWhatsappErro(texto);
+    } catch (e) {
+      console.warn('⚠️ Falha ao enviar alerta de sucesso (ignorado):', e.message);
+    }
 
     return true;
   }
@@ -42,7 +46,7 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
     ordem_compra: data.retorno?.ordem_compra,
   });
 
-  const erroTexto = `🚨 Falha ao criar Ordem de Compra\nPedido: ${numeroPedido}\nMarca: ${marca}\nMotivo: ${mensagem || 'Sem mensagem'}\nDetalhes: ${JSON.stringify(detalhes)}`;
+  const erroTexto = `🚨 Falha ao criar Ordem de Compra\nPedido: ${numeroPedido || '[indefinido]'}\nMarca: ${marca || '[indefinida]'}\nMotivo: ${mensagem || 'Sem mensagem'}\nDetalhes: ${JSON.stringify(detalhes)}`;
 
   await enviarWhatsappErro(erroTexto);
 
