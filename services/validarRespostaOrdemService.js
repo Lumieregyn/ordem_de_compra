@@ -11,9 +11,20 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
   const status = data.retorno.status;
   const idOrdem = data.retorno.ordem_compra?.id;
   const mensagem = data.retorno.mensagem;
-  const detalhes = data.retorno.erros || data.retorno.detalhes;
 
-  const erroContaContabil = Array.isArray(detalhes) && detalhes.some(
+  // Garante que detalhes seja sempre um array para análise
+  let detalhes = [];
+  const raw = data.retorno.erros || data.retorno.detalhes;
+
+  if (Array.isArray(raw)) {
+    detalhes = raw;
+  } else if (typeof raw === 'object' && raw !== null) {
+    detalhes = [raw];
+  } else {
+    detalhes = [];
+  }
+
+  const erroContaContabil = detalhes.some(
     err => (err?.campo?.includes('contaContabil') || err?.mensagem?.toLowerCase().includes('conta contábil'))
   );
 
@@ -24,7 +35,7 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
       console.log('⚠️ Ignorando erro de conta contábil como falso positivo.');
     }
 
-    if (mensagem || detalhes) {
+    if (mensagem || detalhes.length > 0) {
       console.log('[OC ℹ️] Mensagem adicional da Tiny:', {
         mensagem,
         detalhes,
@@ -44,7 +55,7 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
 
   console.error('❌ Falha na criação da OC via API Tiny:', {
     status: data.retorno.status,
-    erros: detalhes || 'Sem detalhes de erro',
+    erros: detalhes.length > 0 ? detalhes : 'Sem detalhes de erro',
     ordem_compra: data.retorno?.ordem_compra,
   });
 
