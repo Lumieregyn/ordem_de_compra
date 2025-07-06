@@ -17,7 +17,7 @@ const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 const MAX_PAGINAS = 10;
 
 function normalizarTexto(txt) {
-  return txt?.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
+  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
 }
 
 function filtrarItensNecessarios(itens) {
@@ -166,10 +166,6 @@ router.post('/', async (req, res) => {
         const resposta = await enviarOrdemCompra(payloadOC);
 
         const sucesso = await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
-
-        if (sucesso) {
-          await enviarWhatsappErro(`✅ Ordem de Compra criada com sucesso\nPedido: ${numeroPedido}\nMarca: ${marca}\nFornecedor: ${fornecedor.nome}`);
-        }
 
         resultados.push({ marca, fornecedor: fornecedor.nome, status: sucesso ? 'OK' : 'Falha' });
 
