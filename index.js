@@ -51,7 +51,6 @@ app.get('/testar-marca-ia/:id', async (req, res) => {
 
 app.use('/listar-marcas', listarMarcasRoute);
 app.use('/webhook-pedido', webhookPedidoRoute);
-// 🔁 app.use('/selecionar-fornecedor', selecionarFornecedorRoute); // REMOVIDO TEMPORARIAMENTE
 
 app.listen(PORT, () => {
   console.log(`🌐 Servidor rodando na porta ${PORT}`);
