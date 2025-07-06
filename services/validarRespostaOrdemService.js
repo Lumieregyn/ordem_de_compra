@@ -13,13 +13,16 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
   const mensagem = data.retorno.mensagem;
   const detalhes = data.retorno.erros || data.retorno.detalhes;
 
-  // Nova lógica: considera sucesso mesmo sem ID, se erro for apenas de conta contábil
   const erroContaContabil = Array.isArray(detalhes) && detalhes.some(
     err => (err?.campo?.includes('contaContabil') || err?.mensagem?.toLowerCase().includes('conta contábil'))
   );
 
   if (idOrdem || erroContaContabil) {
     console.log(`✅ OC criada com sucesso (ID: ${idOrdem || 'N/A'}, status: '${status}')`);
+
+    if (erroContaContabil && !idOrdem) {
+      console.log('⚠️ Ignorando erro de conta contábil como falso positivo.');
+    }
 
     if (mensagem || detalhes) {
       console.log('[OC ℹ️] Mensagem adicional da Tiny:', {
@@ -39,7 +42,6 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
     return true;
   }
 
-  // ❌ Nenhum ID retornado e não é caso de exceção
   console.error('❌ Falha na criação da OC via API Tiny:', {
     status: data.retorno.status,
     erros: detalhes || 'Sem detalhes de erro',
