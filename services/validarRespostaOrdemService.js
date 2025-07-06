@@ -3,25 +3,29 @@ const { OpenAI } = require('openai');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-async function analisarSeOcFoiSucessoViaIA(numeroPedido, marca, fornecedor, detalhesErro) {
-  const prompt = `Um sistema automatizado tentou criar uma Ordem de Compra (OC) no Tiny ERP e recebeu o seguinte erro:
+async function analisarComIA(data, numeroPedido, marca) {
+  const detalhes = data?.retorno?.detalhes || data?.retorno?.erros || 'Sem detalhes';
+  const mensagem = data?.retorno?.mensagem || '';
 
-${JSON.stringify(detalhesErro, null, 2)}
+  const prompt = `Você é um sistema de auditoria de pedidos. Analise a resposta abaixo da API Tiny e diga apenas se a Ordem de Compra foi criada com sucesso, mesmo que contenha avisos.
 
-Com base nisso, a OC pode ser considerada criada com sucesso e o erro é irrelevante? Responda apenas "SIM" ou "NAO".`;
+- Pedido: ${numeroPedido || '[indefinido]'}
+- Marca: ${marca || '[indefinida]'}
+- Mensagem: ${mensagem}
+- Detalhes: ${JSON.stringify(detalhes)}
+
+Responda apenas com "SIM" ou "NAO".`;
 
   try {
     const resposta = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo-instruct',
-      prompt,
-      max_tokens: 3,
-      temperature: 0
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
     });
 
-    const texto = resposta.choices?.[0]?.text?.trim().toUpperCase();
-    return texto === 'SIM';
+    return resposta.choices[0]?.message?.content?.toLowerCase().includes('sim');
   } catch (e) {
-    console.error('⚠️ Falha na IA para interpretar erro da OC:', e.message);
+    console.warn('⚠️ Falha ao consultar IA, fallback para heurística:', e.message);
     return false;
   }
 }
@@ -40,17 +44,10 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
   const status = data?.retorno?.status;
   const mensagem = data?.retorno?.mensagem;
 
-  // Verifica com IA se erro é irrelevante
-  const erroIgnoradoViaIA = !idOrdem && detalhes.length > 0
-    ? await analisarSeOcFoiSucessoViaIA(numeroPedido, marca, fornecedor, detalhes)
-    : false;
+  const sucessoIA = await analisarComIA(data, numeroPedido, marca);
 
-  if (idOrdem || erroIgnoradoViaIA) {
+  if (idOrdem || sucessoIA) {
     console.log(`✅ OC criada com sucesso (ID: ${idOrdem || 'N/A'}, status: '${status}')`);
-
-    if (erroIgnoradoViaIA && !idOrdem) {
-      console.log('⚠️ Erro ignorado via IA. Considerando a OC como criada com sucesso.');
-    }
 
     if (mensagem || detalhes.length > 0) {
       console.log('[OC ℹ️] Mensagem adicional da Tiny:', { mensagem, detalhes });
@@ -67,7 +64,6 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
     return true;
   }
 
-  // Se estrutura ausente sem erro conhecido, loga como falha
   if (!data || !data.retorno) {
     const erroCampoContabil = detalhes.some(e => e?.campo === 'parcelas[0].contaContabil.id');
     if (!erroCampoContabil) {
@@ -78,7 +74,7 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor) {
   }
 
   console.error('❌ Falha na criação da OC via API Tiny:', {
-    status,
+    status: status,
     erros: detalhes.length > 0 ? detalhes : 'Sem detalhes de erro',
     ordem_compra: data.retorno?.ordem_compra,
   });
