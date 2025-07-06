@@ -12,6 +12,7 @@ const webhookPedidoRoute = require('./routes/webhookPedido');
 const tokenDebugRoute = require('./routes/tokenDebug');
 const authRoutes = require('./routes/auth');
 const tokenInfoRoute = require('./routes/tokenInfo');
+const listarTodosFornecedoresRoute = require('./routes/listarTodosFornecedores'); // ✅ NOVA ROTA
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -51,7 +52,7 @@ app.get('/testar-marca-ia/:id', async (req, res) => {
 
 app.use('/listar-marcas', listarMarcasRoute);
 app.use('/webhook-pedido', webhookPedidoRoute);
-// 🔁 app.use('/selecionar-fornecedor', selecionarFornecedorRoute); // REMOVIDO TEMPORARIAMENTE
+app.use('/listar-todos-fornecedores', listarTodosFornecedoresRoute); // ✅ HABILITADA
 
 app.listen(PORT, () => {
   console.log(`🌐 Servidor rodando na porta ${PORT}`);
