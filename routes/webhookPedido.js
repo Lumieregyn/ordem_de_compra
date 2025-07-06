@@ -165,9 +165,9 @@ router.post('/', async (req, res) => {
 
         const resposta = await enviarOrdemCompra(payloadOC);
 
-        const sucesso = await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
+        await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
 
-        resultados.push({ marca, fornecedor: fornecedor.nome, status: sucesso ? 'OK' : 'Falha' });
+        resultados.push({ marca, fornecedor: fornecedor.nome, status: 'Processado' });
 
       } catch (erroItem) {
         await enviarWhatsappErro(`❌ Erro ao processar marca ${marca} no pedido ${numeroPedido}\n${erroItem.message}`);
