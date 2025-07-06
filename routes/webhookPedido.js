@@ -7,6 +7,8 @@ const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
 const { getPedidoCompletoById } = require('../services/tinyPedidoService');
+const { validarRespostaOrdem } = require('../services/validarRespostaOrdemService');
+const { enviarWhatsappErro } = require('../services/whatsAppService');
 const axios = require('axios');
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -15,7 +17,7 @@ const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 const MAX_PAGINAS = 10;
 
 function normalizarTexto(txt) {
-  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
+  return txt?.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
 }
 
 function filtrarItensNecessarios(itens) {
@@ -66,36 +68,30 @@ router.post('/', async (req, res) => {
     const idPedido = req.body?.dados?.id;
     const numeroRecebido = req.body?.dados?.numero;
 
-    console.log(`📥 Webhook recebido: ID ${idPedido}, Número ${numeroRecebido}`);
-
     if (!idPedido || !numeroRecebido) {
-      console.warn('❌ Webhook sem ID ou número de pedido válido');
+      await enviarWhatsappErro(`🚨 Pedido ignorado - dados incompletos\nID: ${idPedido}\nNúmero: ${numeroRecebido || '[vazio]'}`);
       return res.status(200).json({ mensagem: 'Webhook ignorado: dados incompletos.' });
     }
 
     if (pedidosProcessados.has(idPedido)) {
-      console.warn(`⏩ Pedido ID ${idPedido} já processado anteriormente. Ignorando duplicado.`);
       return res.status(200).json({ mensagem: 'Pedido já processado anteriormente.' });
     }
 
     const token = await getAccessToken();
     if (!token) {
-      console.error('❌ Token de acesso não disponível. Abandonando fluxo.');
+      await enviarWhatsappErro(`🚨 Token indisponível para pedido ${numeroRecebido}`);
       return res.status(500).json({ erro: 'Token indisponível.' });
     }
 
     const pedido = await getPedidoCompletoById(idPedido);
-    console.log('📦 DEBUG - Pedido completo recebido da Tiny:', JSON.stringify(pedido, null, 2));
-
     const numeroPedido = pedido?.numeroPedido || '[sem número]';
 
     if (!pedido || !pedido.id || !pedido.numeroPedido || pedido.situacao === undefined) {
-      console.warn(`⚠️ Pedido ${numeroPedido} carregado sem campos essenciais.`);
+      await enviarWhatsappErro(`🚨 Pedido ${numeroPedido} inválido\nMotivo: Dados ausentes ou incompletos`);
       return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
     }
 
     if (pedido.situacao !== 3) {
-      console.log(`🛑 Pedido ${numeroPedido} ignorado. Situação atual: ${pedido.situacao}`);
       return res.status(200).json({
         mensagem: `Pedido ${numeroPedido} com situação ${pedido.situacao} não será processado.`
       });
@@ -105,7 +101,6 @@ router.post('/', async (req, res) => {
 
     const itensFiltrados = filtrarItensNecessarios(pedido.itens);
     if (itensFiltrados.length === 0) {
-      console.log(`🛑 Pedido ${numeroPedido} sem itens sob encomenda (SKU com "PEDIDO")`);
       return res.status(200).json({ mensagem: 'Nenhuma OC será gerada. Itens são de estoque.' });
     }
 
@@ -120,7 +115,6 @@ router.post('/', async (req, res) => {
 
         if (!produtoId) continue;
 
-        console.log(`🔍 Buscando produto ${produtoId}`);
         const produto = await getProdutoFromTinyV3(produtoId);
         if (!produto) continue;
 
@@ -151,11 +145,10 @@ router.post('/', async (req, res) => {
         }
 
         if (!fornecedor) {
-          console.warn(`⚠️ Nenhum fornecedor identificado para marca ${marca}.`);
+          await enviarWhatsappErro(`🚨 Ordem de Compra não criada\nPedido: ${numeroPedido}\nMarca: ${marca}\n⚠️ Nenhum fornecedor identificado\n\nFavor ajustar o fornecedor e gerar a OC manualmente.`);
           continue;
         }
 
-        console.log(`🧾 Gerando payload para marca ${marca}`);
         const payloadOC = gerarPayloadOrdemCompra({
           numeroPedido: pedido.numeroPedido,
           nomeCliente: pedido.cliente?.nome || '',
@@ -165,24 +158,24 @@ router.post('/', async (req, res) => {
         });
 
         if (!payloadOC || !payloadOC.itens?.length) {
-          console.warn(`❌ Payload inválido para OC da marca ${marca}.`);
+          await enviarWhatsappErro(`🚨 Payload inválido para OC\nPedido: ${numeroPedido}\nMarca: ${marca}`);
           continue;
         }
 
-        console.log(`🚚 Enviando OC para fornecedor ${fornecedor.nome}`);
         const resposta = await enviarOrdemCompra(payloadOC);
-        resultados.push({ marca, fornecedor: fornecedor.nome, status: resposta });
+
+        const sucesso = await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
+        resultados.push({ marca, fornecedor: fornecedor.nome, status: sucesso ? 'OK' : 'Falha' });
 
       } catch (erroItem) {
-        console.error(`❌ Erro ao processar grupo da marca ${marca}:`, erroItem);
+        await enviarWhatsappErro(`❌ Erro ao processar marca ${marca} no pedido ${numeroPedido}\n${erroItem.message}`);
       }
     }
 
-    console.log(`📦 Resultado final:\n`, resultados);
     return res.status(200).json({ mensagem: 'OC(s) processada(s)', resultados });
 
   } catch (err) {
-    console.error('❌ Erro geral no webhook:', err); // <- LOG COMPLETO DO ERRO
+    await enviarWhatsappErro(`❌ Erro geral ao processar webhook: ${err.message}`);
     return res.status(500).json({ erro: 'Erro interno no processamento do webhook.' });
   }
 });
