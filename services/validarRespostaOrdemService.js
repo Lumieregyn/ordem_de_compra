@@ -14,9 +14,9 @@ async function analisarComIA(data, numeroPedido, marca, fornecedor, contextoExtr
   const status = data?.retorno?.status || '';
   const idOrdem = data?.retorno?.ordem_compra?.id || '';
 
-  // prompt reforçado para IA
-  const prompt = `Você é um sistema de auditoria automatizada para Ordens de Compra do Tiny ERP.
-Recebe sempre respostas da API, que podem indicar sucesso ou erro. Muitas vezes a OC foi criada, mesmo se o único erro retornado for do tipo 'parcelas[0].contaContabil.id' (Conta contábil não encontrada), o que NÃO deve ser considerado erro crítico.
+  const prompt = `
+Você é um sistema de auditoria automatizada para Ordens de Compra do Tiny ERP.
+Recebe respostas da API, que podem indicar sucesso ou erro. Muitas vezes a OC foi criada, mesmo se o único erro retornado for do tipo 'parcelas[0].contaContabil.id' (Conta contábil não encontrada), o que NÃO deve ser considerado erro crítico.
 Avalie sempre como um especialista em integrações Tiny: só envie mensagem de erro caso REALMENTE a OC não tenha sido gerada. Se só existir esse erro de conta contábil, considere SUCESSO (não é erro real).
 
 Se a OC foi gerada, responda apenas "SIM".
@@ -32,7 +32,8 @@ Status: ${status}
 Mensagem: ${mensagem}
 ID OC: ${idOrdem}
 Detalhes: ${JSON.stringify(detalhes)}
-`;
+`.trim();
+
   try {
     const resposta = await openai.chat.completions.create({
       model: 'gpt-4',
@@ -47,7 +48,9 @@ Detalhes: ${JSON.stringify(detalhes)}
 }
 
 async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor, contextoExtra = '') {
-  // Aceita contexto extra (opcional, pode ser usado para "nenhum fornecedor identificado" etc)
+  // DEBUG LOG PARA AUDITAR A ENTRADA
+  console.log('DEBUG - RESPOSTA RECEBIDA DA TINY:', JSON.stringify(data, null, 2));
+
   const detalhesRaw = data?.retorno?.erros || data?.retorno?.detalhes;
   let detalhes = [];
   if (Array.isArray(detalhesRaw)) {
@@ -55,19 +58,18 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor, conte
   } else if (typeof detalhesRaw === 'object' && detalhesRaw !== null) {
     detalhes = [detalhesRaw];
   }
+
   const idOrdem = data?.retorno?.ordem_compra?.id;
   const status = data?.retorno?.status;
   const mensagem = data?.retorno?.mensagem;
 
-  // Toda decisão passa pela IA!
-  const sucessoIA = await analisarComIA(data, numeroPedido, marca, fornecedor, contextoExtra);
-
-  if (idOrdem || sucessoIA) {
-    console.log(`✅ OC criada com sucesso (ID: ${idOrdem || 'N/A'}, status: '${status}')`);
-    if (mensagem || detalhes.length > 0) {
-      console.log('[OC ℹ️] Mensagem adicional da Tiny:', { mensagem, detalhes });
-    }
-    const texto = `✅ Ordem de Compra criada com sucesso\nPedido: ${numeroPedido || '[indefinido]'}\nMarca: ${marca || '[indefinida]'}\nFornecedor: ${fornecedor?.nome || '[desconhecido]'}`;
+  // 1️⃣ CURTO-CIRCUITO FALSO POSITIVO: só erro de conta contábil = SUCESSO (SEM IA)
+  const erroSomenteContaContabil = detalhes.length > 0 && detalhes.every(
+    err => err?.campo === 'parcelas[0].contaContabil.id'
+  );
+  if (erroSomenteContaContabil) {
+    console.log('✅ OC criada com sucesso (falso positivo de conta contábil)');
+    const texto = `✅ Ordem de Compra criada com sucesso\nPedido: ${numeroPedido || '[indefinido]'}\nMarca: ${marca || '[indefinida]'}\nFornecedor: ${fornecedor?.nome || '[desconhecido]'}\n[Ignorado erro de conta contábil]`;
     try {
       await enviarWhatsappErro(texto);
     } catch (e) {
@@ -76,7 +78,32 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor, conte
     return true;
   }
 
-  // Decisão IA: erro real
+  // 2️⃣ SE OC FOI CRIADA (tem ID), sucesso
+  if (idOrdem) {
+    console.log(`✅ OC criada com sucesso (ID: ${idOrdem}, status: '${status}')`);
+    const texto = `✅ Ordem de Compra criada com sucesso\nPedido: ${numeroPedido || '[indefinido]'}\nMarca: ${marca || '[indefinida]'}\nFornecedor: ${fornecedor?.nome || '[desconhecido]'}\nID OC: ${idOrdem}`;
+    try {
+      await enviarWhatsappErro(texto);
+    } catch (e) {
+      console.warn('⚠️ Falha ao enviar alerta de sucesso (ignorado):', e.message);
+    }
+    return true;
+  }
+
+  // 3️⃣ PARA OUTROS CASOS: usa IA para decidir!
+  const sucessoIA = await analisarComIA(data, numeroPedido, marca, fornecedor, contextoExtra);
+  if (sucessoIA) {
+    console.log(`✅ OC criada com sucesso (decisão IA)`);
+    const texto = `✅ Ordem de Compra criada com sucesso\nPedido: ${numeroPedido || '[indefinido]'}\nMarca: ${marca || '[indefinida]'}\nFornecedor: ${fornecedor?.nome || '[desconhecido]'}\n[IA considerou sucesso]`;
+    try {
+      await enviarWhatsappErro(texto);
+    } catch (e) {
+      console.warn('⚠️ Falha ao enviar alerta de sucesso (ignorado):', e.message);
+    }
+    return true;
+  }
+
+  // 4️⃣ SE NÃO É SUCESSO, ENVIA ERRO CRÍTICO
   console.error('❌ Falha na criação da OC via API Tiny:', {
     status,
     erros: detalhes.length > 0 ? detalhes : 'Sem detalhes de erro',
