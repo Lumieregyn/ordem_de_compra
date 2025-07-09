@@ -9,13 +9,14 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
  * NÃO é erro crítico e a OC foi gerada.
  */
 async function analisarComIA(data, numeroPedido, marca, fornecedor, contextoExtra = '') {
-  const detalhes = data?.retorno?.detalhes || data?.retorno?.erros || 'Sem detalhes';
-  const mensagem = data?.retorno?.mensagem || '';
-  const status = data?.retorno?.status || '';
-  const idOrdem = data?.retorno?.ordem_compra?.id || '';
+  // Aceita tanto data.retorno quanto data direto
+  const retorno = data?.retorno || data;
+  const detalhes = retorno?.detalhes || retorno?.erros || 'Sem detalhes';
+  const mensagem = retorno?.mensagem || '';
+  const status = retorno?.status || '';
+  const idOrdem = retorno?.ordem_compra?.id || retorno?.ordemCompra?.id || '';
 
-  const prompt = `
-Você é um sistema de auditoria automatizada para Ordens de Compra do Tiny ERP.
+  const prompt = `Você é um sistema de auditoria automatizada para Ordens de Compra do Tiny ERP.
 Recebe respostas da API, que podem indicar sucesso ou erro. Muitas vezes a OC foi criada, mesmo se o único erro retornado for do tipo 'parcelas[0].contaContabil.id' (Conta contábil não encontrada), o que NÃO deve ser considerado erro crítico.
 Avalie sempre como um especialista em integrações Tiny: só envie mensagem de erro caso REALMENTE a OC não tenha sido gerada. Se só existir esse erro de conta contábil, considere SUCESSO (não é erro real).
 
@@ -32,8 +33,7 @@ Status: ${status}
 Mensagem: ${mensagem}
 ID OC: ${idOrdem}
 Detalhes: ${JSON.stringify(detalhes)}
-`.trim();
-
+`;
   try {
     const resposta = await openai.chat.completions.create({
       model: 'gpt-4',
@@ -48,10 +48,11 @@ Detalhes: ${JSON.stringify(detalhes)}
 }
 
 async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor, contextoExtra = '') {
-  // DEBUG LOG PARA AUDITAR A ENTRADA
-  console.log('DEBUG - RESPOSTA RECEBIDA DA TINY:', JSON.stringify(data, null, 2));
+  // Aceita tanto data.retorno quanto data direto (compatível com todas respostas)
+  const retorno = data?.retorno || data;
+  console.log('DEBUG - RESPOSTA RECEBIDA DA TINY:', JSON.stringify(retorno, null, 2));
 
-  const detalhesRaw = data?.retorno?.erros || data?.retorno?.detalhes;
+  const detalhesRaw = retorno?.erros || retorno?.detalhes;
   let detalhes = [];
   if (Array.isArray(detalhesRaw)) {
     detalhes = detalhesRaw;
@@ -59,9 +60,9 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor, conte
     detalhes = [detalhesRaw];
   }
 
-  const idOrdem = data?.retorno?.ordem_compra?.id;
-  const status = data?.retorno?.status;
-  const mensagem = data?.retorno?.mensagem;
+  const idOrdem = retorno?.ordem_compra?.id || retorno?.ordemCompra?.id;
+  const status = retorno?.status;
+  const mensagem = retorno?.mensagem;
 
   // 1️⃣ CURTO-CIRCUITO FALSO POSITIVO: só erro de conta contábil = SUCESSO (SEM IA)
   const erroSomenteContaContabil = detalhes.length > 0 && detalhes.every(
@@ -69,7 +70,11 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor, conte
   );
   if (erroSomenteContaContabil) {
     console.log('✅ OC criada com sucesso (falso positivo de conta contábil)');
-    const texto = `✅ Ordem de Compra criada com sucesso\nPedido: ${numeroPedido || '[indefinido]'}\nMarca: ${marca || '[indefinida]'}\nFornecedor: ${fornecedor?.nome || '[desconhecido]'}\n[Ignorado erro de conta contábil]`;
+    const texto = `✅ Ordem de Compra criada com sucesso
+Pedido: ${numeroPedido || '[indefinido]'}
+Marca: ${marca || '[indefinida]'}
+Fornecedor: ${fornecedor?.nome || '[desconhecido]'}
+[Ignorado erro de conta contábil]`;
     try {
       await enviarWhatsappErro(texto);
     } catch (e) {
@@ -81,7 +86,11 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor, conte
   // 2️⃣ SE OC FOI CRIADA (tem ID), sucesso
   if (idOrdem) {
     console.log(`✅ OC criada com sucesso (ID: ${idOrdem}, status: '${status}')`);
-    const texto = `✅ Ordem de Compra criada com sucesso\nPedido: ${numeroPedido || '[indefinido]'}\nMarca: ${marca || '[indefinida]'}\nFornecedor: ${fornecedor?.nome || '[desconhecido]'}\nID OC: ${idOrdem}`;
+    const texto = `✅ Ordem de Compra criada com sucesso
+Pedido: ${numeroPedido || '[indefinido]'}
+Marca: ${marca || '[indefinida]'}
+Fornecedor: ${fornecedor?.nome || '[desconhecido]'}
+ID OC: ${idOrdem}`;
     try {
       await enviarWhatsappErro(texto);
     } catch (e) {
@@ -94,7 +103,11 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor, conte
   const sucessoIA = await analisarComIA(data, numeroPedido, marca, fornecedor, contextoExtra);
   if (sucessoIA) {
     console.log(`✅ OC criada com sucesso (decisão IA)`);
-    const texto = `✅ Ordem de Compra criada com sucesso\nPedido: ${numeroPedido || '[indefinido]'}\nMarca: ${marca || '[indefinida]'}\nFornecedor: ${fornecedor?.nome || '[desconhecido]'}\n[IA considerou sucesso]`;
+    const texto = `✅ Ordem de Compra criada com sucesso
+Pedido: ${numeroPedido || '[indefinido]'}
+Marca: ${marca || '[indefinida]'}
+Fornecedor: ${fornecedor?.nome || '[desconhecido]'}
+[IA considerou sucesso]`;
     try {
       await enviarWhatsappErro(texto);
     } catch (e) {
@@ -107,9 +120,13 @@ async function validarRespostaOrdem(data, numeroPedido, marca, fornecedor, conte
   console.error('❌ Falha na criação da OC via API Tiny:', {
     status,
     erros: detalhes.length > 0 ? detalhes : 'Sem detalhes de erro',
-    ordem_compra: data?.retorno?.ordem_compra,
+    ordem_compra: retorno?.ordem_compra || retorno?.ordemCompra,
   });
-  const erroTexto = `🚨 Falha ao criar Ordem de Compra\nPedido: ${numeroPedido || '[indefinido]'}\nMarca: ${marca || '[indefinida]'}\nMotivo: ${mensagem || 'Sem mensagem'}\nDetalhes: ${JSON.stringify(detalhes)}`;
+  const erroTexto = `🚨 Falha ao criar Ordem de Compra
+Pedido: ${numeroPedido || '[indefinido]'}
+Marca: ${marca || '[indefinida]'}
+Motivo: ${mensagem || 'Sem mensagem'}
+Detalhes: ${JSON.stringify(detalhes)}`;
   await enviarWhatsappErro(erroTexto);
   return false;
 }
