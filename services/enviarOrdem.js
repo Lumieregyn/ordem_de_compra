@@ -49,8 +49,8 @@ async function enviarOrdemCompra(payload) {
     const token = await getAccessToken();
 
     const response = await axios.post(
-      // ✅ Endpoint corrigido (sem "s")
-      'https://api.tiny.com.br/public-api/v3/ordem-compra',
+      // 🔧 Endpoint corrigido (evita 404)
+      'https://api.tiny.com.br/public-api/v3/ordens-compra',
       payload,
       {
         headers: {
