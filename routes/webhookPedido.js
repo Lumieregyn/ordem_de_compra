@@ -1,5 +1,3 @@
-// routes/webhookPedido.js - Versão limpa, WhatsApp só via IA do validarRespostaOrdem.js
-
 const express = require('express');
 const router = express.Router();
 
@@ -69,37 +67,45 @@ router.post('/', async (req, res) => {
     const idPedido = req.body?.dados?.id;
     const numeroRecebido = req.body?.dados?.numero;
 
-    // Não dispara WhatsApp aqui! Apenas log ou status HTTP:
     if (!idPedido || !numeroRecebido) {
+      console.warn('⚠️ Webhook sem dados essenciais:', req.body);
       return res.status(200).json({ mensagem: 'Webhook ignorado: dados incompletos.' });
     }
 
     if (pedidosProcessados.has(idPedido)) {
+      console.log(`⏩ Pedido ID ${idPedido} já processado. Ignorando duplicado.`);
       return res.status(200).json({ mensagem: 'Pedido já processado anteriormente.' });
     }
 
     const token = await getAccessToken();
     if (!token) {
+      console.error('❌ Token indisponível.');
       return res.status(500).json({ erro: 'Token indisponível.' });
     }
 
     const pedido = await getPedidoCompletoById(idPedido);
     const numeroPedido = pedido?.numeroPedido || '[sem número]';
 
+    // LOG PRINCIPAL: DADOS COMPLETOS DO PEDIDO
+    console.log('📦 PEDIDO COMPLETO:', JSON.stringify(pedido, null, 2));
+
     if (!pedido || !pedido.id || !pedido.numeroPedido || pedido.situacao === undefined) {
+      console.warn('⚠️ Pedido incompleto recebido:', JSON.stringify(pedido, null, 2));
       return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
     }
 
     if (pedido.situacao !== 3) {
-      return res.status(200).json({
-        mensagem: `Pedido ${numeroPedido} com situação ${pedido.situacao} não será processado.`
-      });
+      console.log(`🛑 Pedido ${numeroPedido} com situação ${pedido.situacao}. Ignorado.`);
+      return res.status(200).json({ mensagem: `Pedido ${numeroPedido} com situação ${pedido.situacao} não será processado.` });
     }
 
     pedidosProcessados.add(idPedido);
 
     const itensFiltrados = filtrarItensNecessarios(pedido.itens);
+    console.log(`🔍 Itens com SKU "PEDIDO":`, itensFiltrados.map(i => i.produto?.sku));
+
     if (itensFiltrados.length === 0) {
+      console.log(`🛑 Pedido ${numeroPedido} sem itens sob encomenda.`);
       return res.status(200).json({ mensagem: 'Nenhuma OC será gerada. Itens são de estoque.' });
     }
 
@@ -135,7 +141,6 @@ router.post('/', async (req, res) => {
       let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
         || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
 
-      // Fluxo de IA para escolher fornecedor (mantido)
       if (!fornecedor) {
         const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
         if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
@@ -143,7 +148,6 @@ router.post('/', async (req, res) => {
         }
       }
 
-      // ⚠️ Aqui ÚNICO caso onde WhatsApp pode ser disparado antes da OC:
       if (!fornecedor) {
         const skus = itensDaMarca.map(i => i.sku).join(', ');
         await validarRespostaOrdem(
@@ -164,16 +168,15 @@ router.post('/', async (req, res) => {
       });
 
       if (!payloadOC || !payloadOC.itens?.length) {
-        continue; // Simplesmente ignora payload inválido
+        console.warn(`❌ Payload inválido para marca ${marca}`);
+        continue;
       }
 
       try {
         const resposta = await enviarOrdemCompra(payloadOC);
         const sucesso = await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
-
         resultados.push({ marca, fornecedor: fornecedor.nome, status: sucesso ? 'OK' : 'Falha' });
       } catch (erroEnvio) {
-        // Se falhar mesmo assim, não dispara WhatsApp aqui!
         console.error(`❌ Erro ao enviar OC da marca ${marca} no pedido ${numeroPedido}`, erroEnvio);
       }
     }
@@ -181,7 +184,6 @@ router.post('/', async (req, res) => {
     return res.status(200).json({ mensagem: 'OC(s) processada(s)', resultados });
 
   } catch (err) {
-    // Erros genéricos: só log, sem WhatsApp
     console.error('❌ Erro geral ao processar webhook:', err);
     return res.status(500).json({ erro: 'Erro interno no processamento do webhook.' });
   }
