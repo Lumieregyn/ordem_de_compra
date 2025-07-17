@@ -35,31 +35,48 @@ function agruparItensPorMarca(itensComMarca) {
 
 async function listarTodosFornecedores() {
   const token = await getAccessToken();
-  if (!token) return [];
-
-  const todos = [];
-  let page = 1;
-  const limit = 50;
-
-  try {
-    while (page <= MAX_PAGINAS) {
-      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=J&nome=FORNECEDOR&page=${page}&limit=${limit}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      const contatosPagina = response.data.itens || [];
-      if (!contatosPagina.length) break;
-
-      todos.push(...contatosPagina);
-      page++;
-      await delay(500);
-    }
-
-    return Array.from(new Map(todos.map(f => [f.id, f])).values());
-  } catch (err) {
-    console.error('❌ Erro ao buscar fornecedores:', err.message);
+  if (!token) {
+    console.error('❌ Token Tiny não disponível.');
     return [];
   }
+
+  const fornecedoresMap = new Map();
+
+  for (let pagina = 1; pagina <= MAX_PAGINAS; pagina++) {
+    try {
+      const url = `${TINY_API_V3_BASE}/contatos?tipo=J&nome=FORNECEDOR&page=${pagina}&limit=50`;
+      const response = await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        validateStatus: () => true,
+      });
+
+      const contatos = response.data?.itens || [];
+      console.log(`📦 Página ${pagina}: ${contatos.length} fornecedores recebidos`);
+
+      if (contatos.length === 0) break;
+
+      for (const f of contatos) {
+        if (
+          f?.id &&
+          typeof f.nome === 'string' &&
+          f.nome.toUpperCase().startsWith('FORNECEDOR ') &&
+          f.tipoPessoa === 'J'
+        ) {
+          fornecedoresMap.set(f.id, f);
+        }
+      }
+
+      await delay(500); // prevenir 429
+
+    } catch (err) {
+      console.error(`❌ Erro ao buscar fornecedores na página ${pagina}:`, err.response?.data || err.message);
+      break;
+    }
+  }
+
+  const fornecedores = Array.from(fornecedoresMap.values());
+  console.log(`✅ Total de fornecedores PJ com nome 'FORNECEDOR X': ${fornecedores.length}`);
+  return fornecedores;
 }
 
 router.post('/', async (req, res) => {
@@ -85,13 +102,14 @@ router.post('/', async (req, res) => {
       return res.status(500).json({ erro: 'Token indisponível.' });
     }
 
+    console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido} (tentativa 1)`);
     const pedido = await getPedidoCompletoById(idPedido);
     const numeroPedido = pedido?.numeroPedido || '[sem número]';
 
     console.log('📦 DEBUG - Pedido completo recebido da Tiny:', JSON.stringify(pedido, null, 2));
 
     if (!pedido || !pedido.id || !pedido.numeroPedido || pedido.situacao === undefined) {
-      console.warn(`⚠️ Pedido ${idPedido} retornou incompleto:`, JSON.stringify(pedido, null, 2));
+      console.warn(`⚠️ Pedido ${idPedido} retornado incompleto:`, JSON.stringify(pedido, null, 2));
       return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
     }
 
@@ -106,8 +124,8 @@ router.post('/', async (req, res) => {
     console.log(`🔍 Itens com SKU "PEDIDO":`, itensFiltrados.map(i => i.produto?.sku));
 
     if (itensFiltrados.length === 0) {
-      console.log(`🛑 Pedido ${numeroPedido} sem itens sob encomenda (SKU com "PEDIDO")`);
-      return res.status(200).json({ mensagem: 'Nenhuma OC será gerada. Itens são de estoque.' });
+      console.log(`🛑 Pedido ${numeroPedido} sem itens sob encomenda`);
+      return res.status(200).json({ mensagem: 'Itens não requerem OC (sem SKU "PEDIDO")' });
     }
 
     const fornecedores = await listarTodosFornecedores();
@@ -121,10 +139,10 @@ router.post('/', async (req, res) => {
 
         if (!produtoId) continue;
 
-        console.log(`🔍 Buscando produto ${produtoId}`);
+        console.log(`🔍 Buscando produto ID: ${produtoId}`);
         const produto = await getProdutoFromTinyV3(produtoId);
         if (!produto) {
-          console.warn(`⚠️ Produto ${produtoId} não retornado pela Tiny.`);
+          console.warn(`⚠️ Produto ${produtoId} não encontrado.`);
           continue;
         }
 
@@ -135,6 +153,7 @@ router.post('/', async (req, res) => {
           continue;
         }
 
+        console.log(`✅ Produto ID ${produtoId} carregado com sucesso`);
         itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
       } catch (erroProduto) {
         console.error(`❌ Erro ao buscar produto do item:`, erroProduto);
@@ -151,16 +170,28 @@ router.post('/', async (req, res) => {
           || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
 
         if (!fornecedor) {
-          console.log('🤖 Buscando fornecedor via IA para:', marca);
-          const respostaIA = await analisarPedidoViaIA({
+          const itemRef = itensDaMarca[0];
+          const pedidoContexto = {
             marca,
-            produtoSKU: itensDaMarca[0].sku,
-            fornecedores
+            produto: itemRef?.produto || {},
+            produtoSKU: itemRef?.sku,
+            quantidade: itemRef?.quantidade,
+            valorUnitario: itemRef?.valorUnitario,
+          };
+
+          console.log('📤 Enviando para IA com contexto:', {
+            produtoSKU: pedidoContexto.produtoSKU,
+            quantidade: pedidoContexto.quantidade,
+            valorUnitario: pedidoContexto.valorUnitario,
+            marca: pedidoContexto.marca,
+            fornecedorCount: fornecedores.length
           });
 
+          const respostaIA = await analisarPedidoViaIA(pedidoContexto, fornecedores);
           console.log('🤖 Resposta IA:', respostaIA);
-          if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
-            fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
+
+          if (respostaIA?.itens?.[0]?.deveGerarOC && respostaIA.itens[0].idFornecedor) {
+            fornecedor = fornecedores.find(f => f.id === respostaIA.itens[0].idFornecedor);
           }
         }
 
@@ -175,7 +206,6 @@ router.post('/', async (req, res) => {
           continue;
         }
 
-        console.log(`🧾 Gerando payload para marca ${marca}`);
         const payloadOC = gerarPayloadOrdemCompra({
           numeroPedido,
           nomeCliente: pedido.cliente?.nome || '',
@@ -194,6 +224,7 @@ router.post('/', async (req, res) => {
         const sucesso = await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
 
         resultados.push({ marca, fornecedor: fornecedor.nome, status: sucesso ? 'OK' : 'Falha' });
+
       } catch (erroMarca) {
         console.error(`❌ Erro ao processar marca ${marca}:`, erroMarca);
       }
