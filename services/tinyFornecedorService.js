@@ -1,53 +1,47 @@
 const axios = require('axios');
-const { getAccessToken } = require('./tokenService');
-const { delay } = require('./tinyUtils');
 
-const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
-const MAX_PAGINAS = 10;
+const BASE_URL = 'https://api.tiny.com.br/api2/fornecedores.pesquisa.php';
+const API_TOKEN = process.env.TINY_API_TOKEN;
+
+// Delay para evitar erro 429
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function listarTodosFornecedores() {
-  const token = await getAccessToken();
-  if (!token) {
-    console.error('❌ Token Tiny não disponível.');
-    return [];
-  }
-
   const fornecedoresMap = new Map();
+  const maxPaginas = 10;
+  const delayEntreRequisicoes = 800;
 
-  for (let pagina = 1; pagina <= MAX_PAGINAS; pagina++) {
+  for (let pagina = 1; pagina <= maxPaginas; pagina++) {
     try {
-      const url = `${TINY_API_V3_BASE}/contatos?tipo=J&nome=FORNECEDOR&page=${pagina}&limit=50`;
-      const response = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        validateStatus: () => true,
-      });
+      const url = `${BASE_URL}?token=${API_TOKEN}&formato=json&pagina=${pagina}&nome=FORNECEDOR%20`;
+      const response = await axios.get(url);
+      const lista = response.data?.retorno?.fornecedores || [];
 
-      const contatos = response.data?.itens || [];
-      console.log(`📦 Página ${pagina}: ${contatos.length} fornecedores recebidos`);
+      if (lista.length === 0) break;
 
-      if (contatos.length === 0) break;
-
-      for (const f of contatos) {
+      lista.forEach(item => {
+        const f = item?.fornecedor;
         if (
           f?.id &&
-          typeof f.nome === 'string' &&
-          f.nome.toUpperCase().startsWith('FORNECEDOR ') &&
-          f.tipoPessoa === 'J'
+          f?.nome?.toUpperCase().startsWith('FORNECEDOR ') &&
+          f?.tipoPessoa === 'J'
         ) {
-          fornecedoresMap.set(f.id, f);
+          fornecedoresMap.set(f.id, f); // evita duplicatas
         }
-      }
+      });
 
-      await delay(500); // prevenir 429
+      const ultimaPagina = response.data?.retorno?.pagina?.ultima === "true";
+      if (ultimaPagina) break;
 
-    } catch (err) {
-      console.error(`❌ Erro ao buscar fornecedores na página ${pagina}:`, err.response?.data || err.message);
+      await delay(delayEntreRequisicoes);
+    } catch (error) {
+      console.error(`[listarTodosFornecedores] Erro na página ${pagina}:`, error.response?.data || error.message);
       break;
     }
   }
 
   const fornecedores = Array.from(fornecedoresMap.values());
-  console.log(`✅ Total de fornecedores PJ com nome 'FORNECEDOR X': ${fornecedores.length}`);
+  console.log(`[listarTodosFornecedores] Total filtrado: ${fornecedores.length}`);
   return fornecedores;
 }
 

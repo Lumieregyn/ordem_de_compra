@@ -7,7 +7,6 @@ const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
 const { getPedidoCompletoById } = require('../services/tinyPedidoService');
-const { validarRespostaOrdem } = require('../services/validarRespostaOrdemService');
 const axios = require('axios');
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -35,48 +34,31 @@ function agruparItensPorMarca(itensComMarca) {
 
 async function listarTodosFornecedores() {
   const token = await getAccessToken();
-  if (!token) {
-    console.error('❌ Token Tiny não disponível.');
-    return [];
-  }
+  if (!token) return [];
 
-  const fornecedoresMap = new Map();
+  const todos = [];
+  let page = 1;
+  const limit = 50;
 
-  for (let pagina = 1; pagina <= MAX_PAGINAS; pagina++) {
-    try {
-      const url = `${TINY_API_V3_BASE}/contatos?tipo=J&nome=FORNECEDOR&page=${pagina}&limit=50`;
-      const response = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        validateStatus: () => true,
+  try {
+    while (page <= MAX_PAGINAS) {
+      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=J&nome=FORNECEDOR&page=${page}&limit=${limit}`, {
+        headers: { Authorization: `Bearer ${token}` }
       });
 
-      const contatos = response.data?.itens || [];
-      console.log(`📦 Página ${pagina}: ${contatos.length} fornecedores recebidos`);
+      const contatosPagina = response.data.itens || [];
+      if (!contatosPagina.length) break;
 
-      if (contatos.length === 0) break;
-
-      for (const f of contatos) {
-        if (
-          f?.id &&
-          typeof f.nome === 'string' &&
-          f.nome.toUpperCase().startsWith('FORNECEDOR ') &&
-          f.tipoPessoa === 'J'
-        ) {
-          fornecedoresMap.set(f.id, f);
-        }
-      }
-
-      await delay(500); // prevenir 429
-
-    } catch (err) {
-      console.error(`❌ Erro ao buscar fornecedores na página ${pagina}:`, err.response?.data || err.message);
-      break;
+      todos.push(...contatosPagina);
+      page++;
+      await delay(500);
     }
-  }
 
-  const fornecedores = Array.from(fornecedoresMap.values());
-  console.log(`✅ Total de fornecedores PJ com nome 'FORNECEDOR X': ${fornecedores.length}`);
-  return fornecedores;
+    return Array.from(new Map(todos.map(f => [f.id, f])).values());
+  } catch (err) {
+    console.error('❌ Erro ao buscar fornecedores:', err.message);
+    return [];
+  }
 }
 
 router.post('/', async (req, res) => {
@@ -87,45 +69,44 @@ router.post('/', async (req, res) => {
     console.log(`📥 Webhook recebido: ID ${idPedido}, Número ${numeroRecebido}`);
 
     if (!idPedido || !numeroRecebido) {
-      console.warn('⚠️ Webhook sem ID ou número de pedido válido:', req.body);
+      console.warn('❌ Webhook sem ID ou número de pedido válido');
       return res.status(200).json({ mensagem: 'Webhook ignorado: dados incompletos.' });
     }
 
     if (pedidosProcessados.has(idPedido)) {
-      console.log(`⏩ Pedido ID ${idPedido} já processado anteriormente.`);
+      console.warn(`⏩ Pedido ID ${idPedido} já processado anteriormente. Ignorando duplicado.`);
       return res.status(200).json({ mensagem: 'Pedido já processado anteriormente.' });
     }
 
     const token = await getAccessToken();
     if (!token) {
-      console.error('❌ Token de acesso indisponível.');
+      console.error('❌ Token de acesso não disponível. Abandonando fluxo.');
       return res.status(500).json({ erro: 'Token indisponível.' });
     }
 
-    console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido} (tentativa 1)`);
     const pedido = await getPedidoCompletoById(idPedido);
-    const numeroPedido = pedido?.numeroPedido || '[sem número]';
-
     console.log('📦 DEBUG - Pedido completo recebido da Tiny:', JSON.stringify(pedido, null, 2));
 
+    const numeroPedido = pedido?.numeroPedido || '[sem número]';
+
     if (!pedido || !pedido.id || !pedido.numeroPedido || pedido.situacao === undefined) {
-      console.warn(`⚠️ Pedido ${idPedido} retornado incompleto:`, JSON.stringify(pedido, null, 2));
+      console.warn(`⚠️ Pedido ${numeroPedido} carregado sem campos essenciais.`);
       return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
     }
 
     if (pedido.situacao !== 3) {
-      console.log(`🛑 Pedido ${numeroPedido} com situação ${pedido.situacao}. Ignorado.`);
-      return res.status(200).json({ mensagem: `Pedido ${numeroPedido} com situação ${pedido.situacao} não será processado.` });
+      console.log(`🛑 Pedido ${numeroPedido} ignorado. Situação atual: ${pedido.situacao}`);
+      return res.status(200).json({
+        mensagem: `Pedido ${numeroPedido} com situação ${pedido.situacao} não será processado.`
+      });
     }
 
     pedidosProcessados.add(idPedido);
 
     const itensFiltrados = filtrarItensNecessarios(pedido.itens);
-    console.log(`🔍 Itens com SKU "PEDIDO":`, itensFiltrados.map(i => i.produto?.sku));
-
     if (itensFiltrados.length === 0) {
-      console.log(`🛑 Pedido ${numeroPedido} sem itens sob encomenda`);
-      return res.status(200).json({ mensagem: 'Itens não requerem OC (sem SKU "PEDIDO")' });
+      console.log(`🛑 Pedido ${numeroPedido} sem itens sob encomenda (SKU com "PEDIDO")`);
+      return res.status(200).json({ mensagem: 'Nenhuma OC será gerada. Itens são de estoque.' });
     }
 
     const fornecedores = await listarTodosFornecedores();
@@ -139,21 +120,14 @@ router.post('/', async (req, res) => {
 
         if (!produtoId) continue;
 
-        console.log(`🔍 Buscando produto ID: ${produtoId}`);
+        console.log(`🔍 Buscando produto ${produtoId}`);
         const produto = await getProdutoFromTinyV3(produtoId);
-        if (!produto) {
-          console.warn(`⚠️ Produto ${produtoId} não encontrado.`);
-          continue;
-        }
+        if (!produto) continue;
 
         const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
         const marca = produto.marca?.nome?.trim();
-        if (!marca) {
-          console.warn(`⚠️ Produto ${sku} sem marca definida.`);
-          continue;
-        }
+        if (!marca) continue;
 
-        console.log(`✅ Produto ID ${produtoId} carregado com sucesso`);
         itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
       } catch (erroProduto) {
         console.error(`❌ Erro ao buscar produto do item:`, erroProduto);
@@ -170,44 +144,20 @@ router.post('/', async (req, res) => {
           || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
 
         if (!fornecedor) {
-          const itemRef = itensDaMarca[0];
-          const pedidoContexto = {
-            marca,
-            produto: itemRef?.produto || {},
-            produtoSKU: itemRef?.sku,
-            quantidade: itemRef?.quantidade,
-            valorUnitario: itemRef?.valorUnitario,
-          };
-
-          console.log('📤 Enviando para IA com contexto:', {
-            produtoSKU: pedidoContexto.produtoSKU,
-            quantidade: pedidoContexto.quantidade,
-            valorUnitario: pedidoContexto.valorUnitario,
-            marca: pedidoContexto.marca,
-            fornecedorCount: fornecedores.length
-          });
-
-          const respostaIA = await analisarPedidoViaIA(pedidoContexto, fornecedores);
-          console.log('🤖 Resposta IA:', respostaIA);
-
-          if (respostaIA?.itens?.[0]?.deveGerarOC && respostaIA.itens[0].idFornecedor) {
-            fornecedor = fornecedores.find(f => f.id === respostaIA.itens[0].idFornecedor);
+          const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
+          if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
+            fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
           }
         }
 
         if (!fornecedor) {
-          const skus = itensDaMarca.map(i => i.sku).join(', ');
-          await validarRespostaOrdem(
-            { retorno: { mensagem: 'Nenhum fornecedor identificado', detalhes: skus } },
-            numeroPedido,
-            marca,
-            null
-          );
+          console.warn(`⚠️ Nenhum fornecedor identificado para marca ${marca}.`);
           continue;
         }
 
+        console.log(`🧾 Gerando payload para marca ${marca}`);
         const payloadOC = gerarPayloadOrdemCompra({
-          numeroPedido,
+          numeroPedido: pedido.numeroPedido,
           nomeCliente: pedido.cliente?.nome || '',
           dataPrevista: pedido.dataPrevista,
           itens: itensDaMarca,
@@ -215,26 +165,24 @@ router.post('/', async (req, res) => {
         });
 
         if (!payloadOC || !payloadOC.itens?.length) {
-          console.warn(`❌ Payload inválido para OC da marca ${marca}`);
+          console.warn(`❌ Payload inválido para OC da marca ${marca}.`);
           continue;
         }
 
         console.log(`🚚 Enviando OC para fornecedor ${fornecedor.nome}`);
         const resposta = await enviarOrdemCompra(payloadOC);
-        const sucesso = await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
+        resultados.push({ marca, fornecedor: fornecedor.nome, status: resposta });
 
-        resultados.push({ marca, fornecedor: fornecedor.nome, status: sucesso ? 'OK' : 'Falha' });
-
-      } catch (erroMarca) {
-        console.error(`❌ Erro ao processar marca ${marca}:`, erroMarca);
+      } catch (erroItem) {
+        console.error(`❌ Erro ao processar grupo da marca ${marca}:`, erroItem);
       }
     }
 
-    console.log(`📦 Resultado final:`, resultados);
+    console.log(`📦 Resultado final:\n`, resultados);
     return res.status(200).json({ mensagem: 'OC(s) processada(s)', resultados });
 
   } catch (err) {
-    console.error('❌ Erro geral ao processar webhook:', err);
+    console.error('❌ Erro geral no webhook:', err); // <- LOG COMPLETO DO ERRO
     return res.status(500).json({ erro: 'Erro interno no processamento do webhook.' });
   }
 });

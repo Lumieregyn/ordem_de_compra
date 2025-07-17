@@ -72,25 +72,14 @@ ${JSON.stringify(listaFornecedores, null, 2)}
     const text = completion.choices[0].message.content.trim();
     console.log('🔎 RESPOSTA IA FORNECEDOR:', text);
 
-    try {
-      const start = text.indexOf('{');
-      const end = text.lastIndexOf('}');
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    const jsonString = text.substring(start, end + 1);
 
-      if (start === -1 || end === -1 || end <= start) {
-        throw new Error('Delimitadores de JSON não encontrados.');
-      }
-
-      const jsonString = text.substring(start, end + 1);
-      const parsed = JSON.parse(jsonString);
-      return parsed;
-    } catch (erroParse) {
-      console.warn('⚠️ IA retornou resposta malformada ou fora do padrão JSON:', text);
-      return { erro: 'Resposta inválida da IA' };
-    }
-
+    return JSON.parse(jsonString);
   } catch (err) {
-    console.error('❌ Erro na chamada da IA (OpenAI):', err.message);
-    return { erro: 'Falha ao consultar IA' };
+    console.error('❌ Erro ao interpretar resposta da IA:', err.message);
+    return { erro: 'Resposta inválida da IA' };
   }
 }
 
