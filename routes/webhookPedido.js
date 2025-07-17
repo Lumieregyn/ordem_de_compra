@@ -67,30 +67,31 @@ router.post('/', async (req, res) => {
     const idPedido = req.body?.dados?.id;
     const numeroRecebido = req.body?.dados?.numero;
 
+    console.log(`📥 Webhook recebido: ID ${idPedido}, Número ${numeroRecebido}`);
+
     if (!idPedido || !numeroRecebido) {
-      console.warn('⚠️ Webhook sem dados essenciais:', req.body);
+      console.warn('⚠️ Webhook sem ID ou número de pedido válido:', req.body);
       return res.status(200).json({ mensagem: 'Webhook ignorado: dados incompletos.' });
     }
 
     if (pedidosProcessados.has(idPedido)) {
-      console.log(`⏩ Pedido ID ${idPedido} já processado. Ignorando duplicado.`);
+      console.log(`⏩ Pedido ID ${idPedido} já processado anteriormente.`);
       return res.status(200).json({ mensagem: 'Pedido já processado anteriormente.' });
     }
 
     const token = await getAccessToken();
     if (!token) {
-      console.error('❌ Token indisponível.');
+      console.error('❌ Token de acesso indisponível.');
       return res.status(500).json({ erro: 'Token indisponível.' });
     }
 
     const pedido = await getPedidoCompletoById(idPedido);
     const numeroPedido = pedido?.numeroPedido || '[sem número]';
 
-    // LOG PRINCIPAL: DADOS COMPLETOS DO PEDIDO
-    console.log('📦 PEDIDO COMPLETO:', JSON.stringify(pedido, null, 2));
+    console.log('📦 DEBUG - Pedido completo recebido da Tiny:', JSON.stringify(pedido, null, 2));
 
     if (!pedido || !pedido.id || !pedido.numeroPedido || pedido.situacao === undefined) {
-      console.warn('⚠️ Pedido incompleto recebido:', JSON.stringify(pedido, null, 2));
+      console.warn(`⚠️ Pedido ${idPedido} retornou incompleto:`, JSON.stringify(pedido, null, 2));
       return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
     }
 
@@ -105,7 +106,7 @@ router.post('/', async (req, res) => {
     console.log(`🔍 Itens com SKU "PEDIDO":`, itensFiltrados.map(i => i.produto?.sku));
 
     if (itensFiltrados.length === 0) {
-      console.log(`🛑 Pedido ${numeroPedido} sem itens sob encomenda.`);
+      console.log(`🛑 Pedido ${numeroPedido} sem itens sob encomenda (SKU com "PEDIDO")`);
       return res.status(200).json({ mensagem: 'Nenhuma OC será gerada. Itens são de estoque.' });
     }
 
@@ -120,12 +121,19 @@ router.post('/', async (req, res) => {
 
         if (!produtoId) continue;
 
+        console.log(`🔍 Buscando produto ${produtoId}`);
         const produto = await getProdutoFromTinyV3(produtoId);
-        if (!produto) continue;
+        if (!produto) {
+          console.warn(`⚠️ Produto ${produtoId} não retornado pela Tiny.`);
+          continue;
+        }
 
         const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
         const marca = produto.marca?.nome?.trim();
-        if (!marca) continue;
+        if (!marca) {
+          console.warn(`⚠️ Produto ${sku} sem marca definida.`);
+          continue;
+        }
 
         itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
       } catch (erroProduto) {
@@ -137,50 +145,61 @@ router.post('/', async (req, res) => {
     const resultados = [];
 
     for (const [marca, itensDaMarca] of Object.entries(agrupadosPorMarca)) {
-      const marcaNorm = normalizarTexto(marca);
-      let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
-        || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
-
-      if (!fornecedor) {
-        const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
-        if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
-          fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
-        }
-      }
-
-      if (!fornecedor) {
-        const skus = itensDaMarca.map(i => i.sku).join(', ');
-        await validarRespostaOrdem(
-          { retorno: { mensagem: 'Nenhum fornecedor identificado', detalhes: skus } },
-          numeroPedido,
-          marca,
-          null
-        );
-        continue;
-      }
-
-      const payloadOC = gerarPayloadOrdemCompra({
-        numeroPedido: pedido.numeroPedido,
-        nomeCliente: pedido.cliente?.nome || '',
-        dataPrevista: pedido.dataPrevista,
-        itens: itensDaMarca,
-        fornecedor
-      });
-
-      if (!payloadOC || !payloadOC.itens?.length) {
-        console.warn(`❌ Payload inválido para marca ${marca}`);
-        continue;
-      }
-
       try {
+        const marcaNorm = normalizarTexto(marca);
+        let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
+          || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
+
+        if (!fornecedor) {
+          console.log('🤖 Buscando fornecedor via IA para:', marca);
+          const respostaIA = await analisarPedidoViaIA({
+            marca,
+            produtoSKU: itensDaMarca[0].sku,
+            fornecedores
+          });
+
+          console.log('🤖 Resposta IA:', respostaIA);
+          if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
+            fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
+          }
+        }
+
+        if (!fornecedor) {
+          const skus = itensDaMarca.map(i => i.sku).join(', ');
+          await validarRespostaOrdem(
+            { retorno: { mensagem: 'Nenhum fornecedor identificado', detalhes: skus } },
+            numeroPedido,
+            marca,
+            null
+          );
+          continue;
+        }
+
+        console.log(`🧾 Gerando payload para marca ${marca}`);
+        const payloadOC = gerarPayloadOrdemCompra({
+          numeroPedido,
+          nomeCliente: pedido.cliente?.nome || '',
+          dataPrevista: pedido.dataPrevista,
+          itens: itensDaMarca,
+          fornecedor
+        });
+
+        if (!payloadOC || !payloadOC.itens?.length) {
+          console.warn(`❌ Payload inválido para OC da marca ${marca}`);
+          continue;
+        }
+
+        console.log(`🚚 Enviando OC para fornecedor ${fornecedor.nome}`);
         const resposta = await enviarOrdemCompra(payloadOC);
         const sucesso = await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
+
         resultados.push({ marca, fornecedor: fornecedor.nome, status: sucesso ? 'OK' : 'Falha' });
-      } catch (erroEnvio) {
-        console.error(`❌ Erro ao enviar OC da marca ${marca} no pedido ${numeroPedido}`, erroEnvio);
+      } catch (erroMarca) {
+        console.error(`❌ Erro ao processar marca ${marca}:`, erroMarca);
       }
     }
 
+    console.log(`📦 Resultado final:`, resultados);
     return res.status(200).json({ mensagem: 'OC(s) processada(s)', resultados });
 
   } catch (err) {
