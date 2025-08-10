@@ -1,9 +1,7 @@
 // services/gerarPayloadOC.js
 const { addBusinessDays } = require('date-fns');
 
-/**
- * Converte "2.016,84" | "2016,84" | 2016.84 para número JS.
- */
+/** Converte "2.016,84" | "2016,84" | 2016.84 -> 2016.84 (number) */
 function toNumberBR(v) {
   if (v == null) return null;
   if (typeof v === 'number' && Number.isFinite(v)) return v;
@@ -13,36 +11,53 @@ function toNumberBR(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * Determina a melhor data base do pedido.
- */
+/** Pega melhor data do pedido (com fallbacks) e retorna YYYY-MM-DD */
 function pickDataPedido(pedido) {
   const candidatas = [
     pedido?.data,
-    pedido?.dados,            // já vi vindo assim nos seus logs
+    pedido?.dados,           // já apareceu nos teus logs
     pedido?.dataEmissao,
-    pedido?.dataFaturamento
+    pedido?.dataFaturamento,
   ].filter(Boolean);
 
-  const iso = (d) => {
-    try {
-      return new Date(d).toISOString().split('T')[0];
-    } catch {
-      return null;
-    }
+  const toISO = (d) => {
+    const dt = new Date(d);
+    return isNaN(dt) ? null : dt.toISOString().slice(0, 10);
   };
 
   for (const d of candidatas) {
-    const v = iso(d);
-    if (v) return v;
+    const iso = toISO(d);
+    if (iso) return iso;
   }
-  return new Date().toISOString().split('T')[0];
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Monta as parcelas com base no pedido; se não houver, 1 parcela = total */
+function montarParcelas(pedido, valorTotal) {
+  const parcelasOrig = pedido?.pagamento?.parcelas;
+  if (Array.isArray(parcelasOrig) && parcelasOrig.length > 0) {
+    const pars = parcelasOrig
+      .map((p) => {
+        const dias = Number(p?.dias ?? 0);
+        const valor = toNumberBR(p?.valor);
+        return (Number.isFinite(dias) && valor != null && valor >= 0)
+          ? { dias, valor }
+          : null;
+      })
+      .filter(Boolean);
+
+    // Se somatório for válido, usa; senão cai para 1 parcela
+    const soma = pars.reduce((acc, x) => acc + x.valor, 0);
+    if (pars.length && soma > 0) return pars;
+  }
+
+  // fallback: 1 parcela
+  return [{ dias: 0, valor: valorTotal }];
 }
 
 /**
- * Gera o payload da Ordem de Compra no padrão da API Tiny v3.
+ * Gera o payload da Ordem de Compra (Tiny v3).
  * @param {Object} dados - { pedido, produto, sku, quantidade, valorUnitario, idFornecedor }
- * @returns {Object} payload JSON final
  */
 function gerarPayloadOrdemCompra(dados) {
   const { pedido, produto, sku, quantidade, valorUnitario, idFornecedor } = dados;
@@ -52,8 +67,10 @@ function gerarPayloadOrdemCompra(dados) {
   if (!pedido) faltando.push('pedido');
   if (!produto?.id) faltando.push('produto.id');
   if (!sku) faltando.push('sku');
-  if (!(quantidade > 0)) faltando.push('quantidade (>0)');
-  if (!(valorUnitario > 0)) faltando.push('valorUnitario (>0)');
+  const qtd = toNumberBR(quantidade);
+  const val = toNumberBR(valorUnitario);
+  if (!(qtd > 0)) faltando.push('quantidade (>0)');
+  if (!(val > 0)) faltando.push('valorUnitario (>0)');
   if (!idFornecedor) faltando.push('idFornecedor');
 
   if (faltando.length) {
@@ -62,35 +79,28 @@ function gerarPayloadOrdemCompra(dados) {
   }
 
   // Datas
-  const dataPedido = pickDataPedido(pedido);
-  const diasPreparacao = produto?.diasPreparacao || 5;
-  const dataPrevista = addBusinessDays(new Date(dataPedido), diasPreparacao)
+  const data = pickDataPedido(pedido);
+  const diasPreparacao = Number(produto?.diasPreparacao ?? 5);
+  const dataPrevista = addBusinessDays(new Date(data), isNaN(diasPreparacao) ? 5 : diasPreparacao)
     .toISOString()
-    .split('T')[0];
+    .slice(0, 10);
 
-  // Valor total
-  const qtd = toNumberBR(quantidade) ?? 1;
-  const val = toNumberBR(valorUnitario) ?? 0;
+  // Totais
   const valorTotal = Number((qtd * val).toFixed(2));
+  const parcelas = montarParcelas(pedido, valorTotal);
 
+  // Observações
+  const observacoes = pedido?.observacoes || 'Gerado automaticamente';
+  const observacoesInternas = 'OC gerada automaticamente via IA';
+
+  // Monta payload mínimo/seguro para V3
   const payload = {
-    data: dataPedido,
+    data,
     dataPrevista,
-    condicao: pedido.condicao || 'A prazo 30 dias',
-    fretePorConta: 'R',
-    observacoes: pedido.observacoes || 'Gerado automaticamente',
-    observacoesInternas: 'OC gerada automaticamente via IA',
+    observacoes,
+    observacoesInternas,
     contato: { id: idFornecedor },
-    categoria: { id: 0 },
-    parcelas: [
-      {
-        dias: 30,
-        valor: valorTotal,
-        contaContabil: { id: 1 },
-        meioPagamento: '1',
-        observacoes: 'Pagamento único'
-      }
-    ],
+    parcelas,
     itens: [
       {
         produto: { id: produto.id },
@@ -98,9 +108,9 @@ function gerarPayloadOrdemCompra(dados) {
         valor: val,
         informacoesAdicionais: `SKU: ${sku} / Fornecedor: ${produto?.marca?.nome || '---'}`,
         aliquotaIPI: 0,
-        valorICMS: 0
-      }
-    ]
+        valorICMS: 0,
+      },
+    ],
   };
 
   return payload;
