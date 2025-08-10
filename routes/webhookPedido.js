@@ -9,14 +9,33 @@ const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
 const { getPedidoCompletoById } = require('../services/tinyPedidoService');
 
-// ✅ novo import unificado
+// serviço unificado de fornecedores
 const { listarTodosFornecedoresUnificado } = require('../services/fornecedorService');
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const pedidosProcessados = new Set();
+const LOOP_DELAY_MS = Number(process.env.WEBHOOK_ITEM_DELAY_MS || 200);
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function normalizarTexto(txt) {
-  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
+  return String(txt || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+// converte "2.016,84" ou "2016.84" -> 2016.84 (número)
+function toNumberBR(v) {
+  if (v == null) return null;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  const s = String(v).trim();
+  // se tem vírgula como decimal, remove pontos e troca vírgula por ponto
+  const normalized = s.includes(',')
+    ? s.replace(/\./g, '').replace(',', '.')
+    : s;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : null;
 }
 
 router.post('/', async (req, res) => {
@@ -53,15 +72,17 @@ router.post('/', async (req, res) => {
       return;
     }
 
-    if (!pedido.itens || !Array.isArray(pedido.itens) || pedido.itens.length === 0) {
+    if (!Array.isArray(pedido.itens) || pedido.itens.length === 0) {
       console.warn(`⚠️ Pedido ${numeroPedido} retornado sem itens. Ignorando.`);
       return;
     }
 
     console.log(`📄 Pedido completo recebido:\n`, JSON.stringify(pedido, null, 2));
 
-    // ✅ usa o serviço unificado (V3 com fallback V2, paginação, 429 retry, dedupe)
+    // fornecedores (V3 com fallback V2)
     const fornecedores = await listarTodosFornecedoresUnificado({ pageSize: 100 });
+    console.log(`📚 Fornecedores carregados: ${fornecedores.length}`);
+
     const resultados = [];
 
     for (const item of pedido.itens) {
@@ -75,55 +96,66 @@ router.post('/', async (req, res) => {
       const marca = produto.marca?.nome?.trim();
       if (!marca) continue;
 
+      // ---------- Seleção de fornecedor ----------
       const marcaNormalizada = normalizarTexto(marca);
-      const nomePadrao = `fornecedor ${marcaNormalizada}`; // compara já normalizado
-      let fornecedorSelecionado = fornecedores.find(f =>
-        normalizarTexto(f.nome) === nomePadrao
-      );
-
-      if (!fornecedorSelecionado) {
-        fornecedorSelecionado = fornecedores.find(f => {
-          const nome = normalizarTexto(f.nome);
-          return (
-            nome.includes(marcaNormalizada) ||
-            marcaNormalizada.includes(nome.replace('fornecedor', '').trim())
-          );
+      const nomePadraoNormalizado = normalizarTexto(`FORNECEDOR ${marca}`);
+      let fornecedorSelecionado =
+        fornecedores.find((f) => normalizarTexto(f.nome) === nomePadraoNormalizado) ||
+        fornecedores.find((f) => {
+          const nome = normalizarTexto(f.nome).replace(/^fornecedor/, '').trim();
+          return nome.includes(marcaNormalizada) || marcaNormalizada.includes(nome);
         });
-      }
 
       if (!fornecedorSelecionado) {
         // fallback IA
         const respostaIA = await analisarPedidoViaIA(
           {
-            produto: produto,
-            quantidade: item.quantidade || 1,
-            valorUnitario: item.valorUnitario || item.valor_unitario || 0,
-            marca
+            produto,
+            quantidade: item.quantidade ?? 1,
+            valorUnitario: item.valorUnitario ?? item.valor_unitario ?? item['valorUnitário'] ?? item.valor ?? null,
+            marca,
           },
           fornecedores
         );
 
-        // a função retorna um JSON; pegamos o primeiro item válido
-        const escolha = Array.isArray(respostaIA?.itens) ? respostaIA.itens[0] : null;
-        if (escolha?.deveGerarOC && typeof escolha?.idFornecedor === 'number') {
-          fornecedorSelecionado = fornecedores.find(f => Number(f.id) === Number(escolha.idFornecedor));
+        // aceita modelo “achatado” OU com {itens:[]}
+        const escolha =
+          (respostaIA && respostaIA.itens && Array.isArray(respostaIA.itens) && respostaIA.itens[0]) ||
+          (respostaIA && typeof respostaIA === 'object' ? respostaIA : null);
+
+        if (escolha?.deveGerarOC && escolha?.idFornecedor != null) {
+          fornecedorSelecionado = fornecedores.find((f) => Number(f.id) === Number(escolha.idFornecedor));
         } else {
           console.warn(`⚠️ Pedido ${numeroPedido} – IA não encontrou fornecedor para SKU ${sku}`);
           continue;
         }
       }
 
+      // ---------- Mapeamento robusto de quantidade/valor ----------
+      const valorUnitRaw =
+        item.valorUnitario ??
+        item.valor_unitario ??
+        item['valorUnitário'] ?? // acento
+        item.valor ??
+        null;
+
+      const quantidadeRaw = item.quantidade ?? item.qtd ?? 1;
+
+      const valorUnitario = toNumberBR(valorUnitRaw);
+      const quantidade = toNumberBR(quantidadeRaw) ?? 1;
+
       const dadosParaOC = {
         produtoId: produto.id,
-        quantidade: item.quantidade || 1,
-        valorUnitario: item.valorUnitario || item.valor_unitario || 0,
+        quantidade,
+        valorUnitario,
         sku,
         idFornecedor: fornecedorSelecionado?.id,
         nomeFornecedor: fornecedorSelecionado?.nome,
         pedido,
-        produto
+        produto,
       };
 
+      // validação: null/undefined é ausente; quantidade/valor precisam ser > 0
       const obrigatorios = [
         'produtoId',
         'quantidade',
@@ -132,26 +164,38 @@ router.post('/', async (req, res) => {
         'idFornecedor',
         'nomeFornecedor',
         'pedido',
-        'produto'
+        'produto',
       ];
 
-      const faltando = obrigatorios.filter(c => !dadosParaOC[c]);
+      const faltando = obrigatorios.filter((c) => {
+        const v = dadosParaOC[c];
+        if (v == null) return true;
+        if (c === 'quantidade' || c === 'valorUnitario') return !(Number(v) > 0);
+        return false;
+      });
+
       if (faltando.length) {
-        console.warn(`⚠️ Campos ausentes para SKU ${sku}: ${faltando.join(', ')}`);
+        console.warn(`⚠️ Campos ausentes/invalidos para SKU ${sku}: ${faltando.join(', ')}`, {
+          debugValor: { quantidade, valorUnitario, bruto: valorUnitRaw },
+        });
         continue;
       }
 
+      // ---------- Geração e envio da OC ----------
       const payloadOC = gerarPayloadOrdemCompra({
         pedido: dadosParaOC.pedido,
         produto: dadosParaOC.produto,
         sku: dadosParaOC.sku,
         quantidade: dadosParaOC.quantidade,
         valorUnitario: dadosParaOC.valorUnitario,
-        idFornecedor: dadosParaOC.idFornecedor
+        idFornecedor: dadosParaOC.idFornecedor,
       });
 
       const resposta = await enviarOrdemCompra(payloadOC);
       resultados.push({ sku, fornecedor: fornecedorSelecionado.nome, status: resposta });
+
+      // throttle leve entre itens para reduzir 429
+      if (LOOP_DELAY_MS > 0) await delay(LOOP_DELAY_MS);
     }
 
     console.log(`📦 Resultado final do processamento:\n`, resultados);
