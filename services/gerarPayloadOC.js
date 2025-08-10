@@ -1,59 +1,85 @@
+// services/gerarPayloadOC.js
 const { addBusinessDays } = require('date-fns');
 
 /**
+ * Converte "2.016,84" | "2016,84" | 2016.84 para número JS.
+ */
+function toNumberBR(v) {
+  if (v == null) return null;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  const s = String(v).trim();
+  const normalized = s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Determina a melhor data base do pedido.
+ */
+function pickDataPedido(pedido) {
+  const candidatas = [
+    pedido?.data,
+    pedido?.dados,            // já vi vindo assim nos seus logs
+    pedido?.dataEmissao,
+    pedido?.dataFaturamento
+  ].filter(Boolean);
+
+  const iso = (d) => {
+    try {
+      return new Date(d).toISOString().split('T')[0];
+    } catch {
+      return null;
+    }
+  };
+
+  for (const d of candidatas) {
+    const v = iso(d);
+    if (v) return v;
+  }
+  return new Date().toISOString().split('T')[0];
+}
+
+/**
  * Gera o payload da Ordem de Compra no padrão da API Tiny v3.
- * @param {Object} dados - Dados completos do pedido e item processado
+ * @param {Object} dados - { pedido, produto, sku, quantidade, valorUnitario, idFornecedor }
  * @returns {Object} payload JSON final
  */
 function gerarPayloadOrdemCompra(dados) {
-  const {
-    pedido,
-    produto,
-    sku,
-    quantidade,
-    valorUnitario,
-    idFornecedor
-  } = dados;
+  const { pedido, produto, sku, quantidade, valorUnitario, idFornecedor } = dados;
 
-  // 🔎 Validação dos campos essenciais
-  const camposObrigatorios = {
-    'pedido': pedido,
-    'produto': produto,
-    'produto.id': produto?.id,
-    'sku': sku,
-    'quantidade': quantidade,
-    'valorUnitario': valorUnitario,
-    'idFornecedor': idFornecedor
-  };
+  // Validação essencial
+  const faltando = [];
+  if (!pedido) faltando.push('pedido');
+  if (!produto?.id) faltando.push('produto.id');
+  if (!sku) faltando.push('sku');
+  if (!(quantidade > 0)) faltando.push('quantidade (>0)');
+  if (!(valorUnitario > 0)) faltando.push('valorUnitario (>0)');
+  if (!idFornecedor) faltando.push('idFornecedor');
 
-  const camposFaltando = Object.entries(camposObrigatorios)
-    .filter(([_, valor]) => valor === undefined || valor === null);
-
-  if (camposFaltando.length > 0) {
-    camposFaltando.forEach(([campo]) =>
-      console.warn(`[Bloco 4 ⚠️] Campo ausente: ${campo}`)
-    );
-    throw new Error('Dados obrigatórios ausentes no Bloco 4');
+  if (faltando.length) {
+    console.warn('[Bloco 5 ⚠️] Campos ausentes:', faltando);
+    throw new Error('Dados obrigatórios ausentes para gerar OC');
   }
 
-  // 📅 Datas
-  const dataPedido = pedido.data;
+  // Datas
+  const dataPedido = pickDataPedido(pedido);
   const diasPreparacao = produto?.diasPreparacao || 5;
   const dataPrevista = addBusinessDays(new Date(dataPedido), diasPreparacao)
     .toISOString()
     .split('T')[0];
 
-  // 💰 Valor total da parcela
-  const valorTotal = Number((quantidade * valorUnitario).toFixed(2));
+  // Valor total
+  const qtd = toNumberBR(quantidade) ?? 1;
+  const val = toNumberBR(valorUnitario) ?? 0;
+  const valorTotal = Number((qtd * val).toFixed(2));
 
-  // 🧾 Payload final da Ordem de Compra
   const payload = {
     data: dataPedido,
     dataPrevista,
-    condicao: pedido.condicao || "A prazo 30 dias",
-    fretePorConta: "R",
-    observacoes: pedido.observacoes || "Gerado automaticamente",
-    observacoesInternas: "OC gerada automaticamente via IA",
+    condicao: pedido.condicao || 'A prazo 30 dias',
+    fretePorConta: 'R',
+    observacoes: pedido.observacoes || 'Gerado automaticamente',
+    observacoesInternas: 'OC gerada automaticamente via IA',
     contato: { id: idFornecedor },
     categoria: { id: 0 },
     parcelas: [
@@ -61,15 +87,15 @@ function gerarPayloadOrdemCompra(dados) {
         dias: 30,
         valor: valorTotal,
         contaContabil: { id: 1 },
-        meioPagamento: "1",
-        observacoes: "Pagamento único"
+        meioPagamento: '1',
+        observacoes: 'Pagamento único'
       }
     ],
     itens: [
       {
         produto: { id: produto.id },
-        quantidade,
-        valor: valorUnitario,
+        quantidade: qtd,
+        valor: val,
         informacoesAdicionais: `SKU: ${sku} / Fornecedor: ${produto?.marca?.nome || '---'}`,
         aliquotaIPI: 0,
         valorICMS: 0
@@ -77,10 +103,7 @@ function gerarPayloadOrdemCompra(dados) {
     ]
   };
 
-  console.log('🔧 Payload OC gerado:', payload);
   return payload;
 }
 
-module.exports = {
-  gerarPayloadOrdemCompra
-};
+module.exports = { gerarPayloadOrdemCompra };
