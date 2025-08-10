@@ -1,109 +1,157 @@
+// services/tinyProductService.js
 const axios = require('axios');
 const { getAccessToken } = require('./tokenService');
 
-// 📦 Lista paginada de produtos da Tiny ERP
-async function listarProdutosTiny() {
-  let token;
+/** =================== Config =================== **/
+const V3_BASE = process.env.TINY_V3_BASE_URL || 'https://erp.tiny.com.br/public-api/v3';
+
+// Retries / Backoff
+const MAX_RETRIES = Number(process.env.TINY_V3_MAX_RETRIES || 5);
+const BACKOFF_BASE_MS = Number(process.env.TINY_V3_BACKOFF_BASE_MS || 600);
+
+// Throttling
+const PAGE_DELAY_MS = Number(process.env.TINY_V3_PAGE_DELAY_MS || 400);
+const REQ_DELAY_MS  = Number(process.env.TINY_V3_REQUEST_DELAY_MS || 250);
+
+// Listagem
+const PAGE_SIZE = Number(process.env.TINY_V3_PAGE_SIZE || 50);
+const MAX_PAGES = Number(process.env.TINY_V3_MAX_PAGES || 0); // 0 = sem limite
+
+/** =================== Utils =================== **/
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const jitter = (ms) => Math.floor(ms * (0.85 + Math.random() * 0.3));
+
+async function getTokenOrNull() {
   try {
-    token = await getAccessToken();
+    const token = await getAccessToken();
     if (!token) {
       console.warn('⚠️ Token da Tiny não encontrado.');
-      return [];
+      return null;
     }
+    return token;
   } catch (err) {
     console.error('❌ Erro ao obter token do Redis:', err.message);
-    return [];
+    return null;
   }
+}
+
+async function axiosGetWithRetry(url, { headers = {}, params = {} } = {}) {
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const resp = await axios.get(url, {
+        headers,
+        params,
+        validateStatus: () => true, // vamos tratar status manualmente
+      });
+
+      const { status } = resp;
+
+      if (status === 200) {
+        // Respeita um pequeno delay para evitar 429 em rajada
+        if (REQ_DELAY_MS > 0) await sleep(REQ_DELAY_MS);
+        return resp;
+      }
+
+      // Re-tentáveis
+      if ([429, 502, 503].includes(status)) {
+        const delay = jitter(BACKOFF_BASE_MS * Math.pow(2, attempt - 1));
+        console.warn(`⏳ ${status} em GET ${url}. Retry ${attempt}/${MAX_RETRIES} em ${delay}ms`);
+        await sleep(delay);
+        continue;
+      }
+
+      // Não re-tentáveis
+      console.error(`❌ GET ${url} retornou status ${status}`, resp.data);
+      return resp;
+    } catch (err) {
+      // Erros de rede / timeout → re-tentáveis
+      const delay = jitter(BACKOFF_BASE_MS * Math.pow(2, attempt - 1));
+      console.warn(`⚠️ Falha de rede em GET ${url} (tentativa ${attempt}). Retry em ${delay}ms: ${err.message}`);
+      await sleep(delay);
+    }
+  }
+
+  throw new Error(`Falha definitiva em GET ${url} após ${MAX_RETRIES} tentativas`);
+}
+
+/** =================== Listagem paginada =================== **/
+async function listarProdutosTiny() {
+  const token = await getTokenOrNull();
+  if (!token) return [];
 
   const produtos = [];
   let pagina = 1;
-  const tamanhoPagina = 50;
 
   try {
     while (true) {
       console.log(`🔄 Buscando produtos - Página ${pagina}`);
 
-      const resp = await axios.get('https://erp.tiny.com.br/public-api/v3/produtos', {
+      const resp = await axiosGetWithRetry(`${V3_BASE}/produtos`, {
         headers: { Authorization: `Bearer ${token}` },
-        params: { pagina, tamanhoPagina }
+        // Mantém os nomes dos params que você já usa hoje
+        params: { pagina, tamanhoPagina: PAGE_SIZE },
       });
 
-      if (!resp.data || !Array.isArray(resp.data.itens)) {
-        console.warn('⚠️ Estrutura inesperada no retorno da API de produtos:', resp.data);
-        break;
-      }
+      const body = resp?.data || {};
+      const itens = Array.isArray(body?.itens) ? body.itens : [];
 
-      const itens = resp.data.itens;
       if (itens.length === 0) break;
 
       for (const item of itens) {
         produtos.push({
           id: item.id,
           sku: item.sku,
-          marca: item.marca?.nome || null
+          marca: item.marca?.nome || null,
         });
       }
 
+      // Parada por limite opcional
       pagina++;
-      await new Promise(res => setTimeout(res, 1000)); // ⏱️ Delay para evitar erro 429
-      if (pagina > 3) break; // ⚠️ LIMITADOR DE TESTE — remova em produção
+      if (MAX_PAGES > 0 && pagina > MAX_PAGES) break;
+
+      // Evita 429 entre páginas
+      if (PAGE_DELAY_MS > 0) await sleep(PAGE_DELAY_MS);
     }
 
     console.log(`✅ ${produtos.length} produtos carregados da Tiny`);
     return produtos;
-
   } catch (err) {
-    console.error('❌ Erro ao buscar produtos da Tiny:', err.response?.data || err.message);
+    console.error('❌ Erro ao buscar produtos da Tiny:', err.message);
     return [];
   }
 }
 
-// 🔍 Consulta individual de produto via ID no Tiny ERP (API v3)
+/** =================== Consulta individual =================== **/
 async function getProdutoFromTinyV3(produtoId) {
   console.log(`🔍 Buscando produto ID: ${produtoId}`);
 
-  let token;
-  try {
-    token = await getAccessToken();
-    if (!token) {
-      console.error('❌ Token OAuth2 não encontrado. Abortando requisição.');
-      return null;
-    }
-  } catch (err) {
-    console.error('❌ Erro ao obter token do Redis:', err.message);
-    return null;
-  }
+  const token = await getTokenOrNull();
+  if (!token) return null;
 
-  const url = `https://erp.tiny.com.br/public-api/v3/produtos/${produtoId}`;
+  const url = `${V3_BASE}/produtos/${produtoId}`;
 
   try {
-    const response = await axios.get(url, {
+    const resp = await axiosGetWithRetry(url, {
       headers: {
         Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
+        'Content-Type': 'application/json',
+      },
     });
 
-    if (response.status !== 200) {
-      console.error(`❌ Resposta inesperada da API (Status: ${response.status})`);
-      return null;
+    if (resp.status === 200 && resp.data) {
+      console.log(`✅ Produto ID ${produtoId} carregado com sucesso`);
+      return resp.data;
     }
 
-    console.log(`✅ Produto ID ${produtoId} carregado com sucesso`);
-    return response.data;
-
+    // Se chegou aqui, status não-200 não re-tentável já foi logado no helper
+    return null;
   } catch (error) {
-    const status = error.response?.status;
-    const msg = error.response?.data || error.message;
-
-    console.error(`❌ Erro ao buscar produto ID ${produtoId} (Status: ${status}):`);
-    console.error(msg);
-
+    console.error(`❌ Erro ao buscar produto ID ${produtoId}:`, error.message);
     return null;
   }
 }
 
 module.exports = {
   listarProdutosTiny,
-  getProdutoFromTinyV3
+  getProdutoFromTinyV3,
 };
