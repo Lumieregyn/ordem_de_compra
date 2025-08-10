@@ -1,3 +1,4 @@
+// routes/webhookPedido.js
 const express = require('express');
 const router = express.Router();
 
@@ -7,48 +8,26 @@ const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
 const { getPedidoCompletoById } = require('../services/tinyPedidoService');
-const axios = require('axios');
 
-const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
-const MAX_PAGINAS = 10;
+// ✅ NOVO: serviço unificado V3→V2
+const { listarTodosFornecedoresUnificado } = require('../services/fornecedorService');
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+// ✅ Opcional: alerta WhatsApp quando IA falhar
+const { enviarWhatsappErro } = require('../services/whatsAppService');
+
 const pedidosProcessados = new Set();
 
 function normalizarTexto(txt) {
-  return txt?.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
-}
-
-async function listarTodosFornecedores() {
-  const token = await getAccessToken();
-  if (!token) return [];
-
-  const todos = [];
-  let page = 1;
-  const limit = 50;
-
-  try {
-    while (page <= MAX_PAGINAS) {
-      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=J&nome=FORNECEDOR&page=${page}&limit=${limit}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      const contatosPagina = response.data.itens || [];
-      if (!contatosPagina.length) break;
-
-      todos.push(...contatosPagina);
-      page++;
-      await delay(500);
-    }
-
-    return Array.from(new Map(todos.map(f => [f.id, f])).values());
-  } catch (err) {
-    console.error('❌ Erro ao buscar fornecedores:', err.message);
-    return [];
-  }
+  return txt
+    ?.normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase()
+    .trim();
 }
 
 router.post('/', async (req, res) => {
+  // responde imediatamente ao webhook
   res.status(200).send('Webhook recebido ✅');
 
   try {
@@ -74,6 +53,7 @@ router.post('/', async (req, res) => {
       return;
     }
 
+    // Pedido completo (com retries internos)
     console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido}...`);
     const pedido = await getPedidoCompletoById(idPedido);
 
@@ -89,7 +69,8 @@ router.post('/', async (req, res) => {
 
     console.log(`📄 Pedido completo recebido:\n`, JSON.stringify(pedido, null, 2));
 
-    const fornecedores = await listarTodosFornecedores();
+    // ✅ Lista fornecedores via serviço unificado (V3 com fallback V2)
+    const fornecedores = await listarTodosFornecedoresUnificado({ pageSize: 100 });
     const resultados = [];
 
     for (const item of pedido.itens) {
@@ -103,30 +84,45 @@ router.post('/', async (req, res) => {
       const marca = produto.marca?.nome?.trim();
       if (!marca) continue;
 
+      // Match direto/heurístico local
       const marcaNormalizada = normalizarTexto(marca);
-      const nomePadrao = `FORNECEDOR ${marcaNormalizada}`;
-      let fornecedorSelecionado = fornecedores.find(f =>
-        normalizarTexto(f.nome) === nomePadrao
+      const nomePadrao = `fornecedor ${marcaNormalizada}`; // usamos minúsculo na comparação
+      let fornecedorSelecionado = fornecedores.find(
+        (f) => normalizarTexto(f.nome) === nomePadrao
       );
 
       if (!fornecedorSelecionado) {
-        fornecedorSelecionado = fornecedores.find(f =>
-          normalizarTexto(f.nome).includes(marcaNormalizada) ||
-          marcaNormalizada.includes(normalizarTexto(f.nome).replace('fornecedor', '').trim())
-        );
+        fornecedorSelecionado = fornecedores.find((f) => {
+          const nomeFornecedor = normalizarTexto(f.nome.replace('fornecedor', '').trim());
+          return (
+            nomeFornecedor.includes(marcaNormalizada) ||
+            marcaNormalizada.includes(nomeFornecedor)
+          );
+        });
       }
 
+      // 🔁 Fallback IA (resposta achatada)
       if (!fornecedorSelecionado) {
-        const respostaIA = await analisarPedidoViaIA({
-          produtoSKU: sku,
-          marca,
+        const respostaIA = await analisarPedidoViaIA(
+          {
+            produtoSKU: sku,
+            marca,
+            quantidade: item.quantidade || 1,
+            valorUnitario: item.valorUnitario || item.valor_unitario || 0
+          },
           fornecedores
-        });
+        );
 
         if (respostaIA?.deveGerarOC && typeof respostaIA?.idFornecedor === 'number') {
-          fornecedorSelecionado = fornecedores.find(f => f.id === respostaIA.idFornecedor);
+          fornecedorSelecionado = fornecedores.find((f) => Number(f.id) === Number(respostaIA.idFornecedor));
         } else {
           console.warn(`⚠️ Pedido ${numeroPedido} – IA não encontrou fornecedor para SKU ${sku}`);
+          // opcional: alerta no WhatsApp para triagem manual
+          try {
+            await enviarWhatsappErro?.(
+              `⚠️ Pedido ${numeroPedido}: IA não retornou fornecedor confiável para SKU ${sku} (marca: ${marca}).`
+            );
+          } catch {}
           continue;
         }
       }
@@ -142,6 +138,7 @@ router.post('/', async (req, res) => {
         produto
       };
 
+      // Validação mínima antes do payload
       const obrigatorios = [
         'produtoId',
         'quantidade',
@@ -152,13 +149,13 @@ router.post('/', async (req, res) => {
         'pedido',
         'produto'
       ];
-
-      const faltando = obrigatorios.filter(c => !dadosParaOC[c]);
+      const faltando = obrigatorios.filter((c) => !dadosParaOC[c]);
       if (faltando.length) {
         console.warn(`⚠️ Campos ausentes para SKU ${sku}: ${faltando.join(', ')}`);
         continue;
       }
 
+      // Payload OC v3
       const payloadOC = gerarPayloadOrdemCompra({
         pedido: dadosParaOC.pedido,
         produto: dadosParaOC.produto,
