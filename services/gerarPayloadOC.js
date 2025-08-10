@@ -4,18 +4,18 @@ const { addBusinessDays } = require('date-fns');
 /** Converte "2.016,84" | "2016,84" | 2016.84 -> 2016.84 (number) */
 function toNumberBR(v) {
   if (v == null) return null;
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'number' && Number.isFinite(v)) return Number(v.toFixed(2));
   const s = String(v).trim();
   const normalized = s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s;
   const n = Number(normalized);
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
 }
 
 /** Pega melhor data do pedido (com fallbacks) e retorna YYYY-MM-DD */
 function pickDataPedido(pedido) {
   const candidatas = [
     pedido?.data,
-    pedido?.dados,           // já apareceu nos teus logs
+    pedido?.dados,
     pedido?.dataEmissao,
     pedido?.dataFaturamento,
   ].filter(Boolean);
@@ -32,6 +32,18 @@ function pickDataPedido(pedido) {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Ajusta parcelas para que a soma == valorTotal (corrige centavos na última) */
+function fixSumParcelas(parcelas, valorTotal) {
+  const somado = parcelas.reduce((acc, p) => acc + toNumberBR(p.valor || 0), 0);
+  const diff = Number((valorTotal - somado).toFixed(2));
+  if (Math.abs(diff) >= 0.01) {
+    // corrige na última parcela
+    const last = parcelas[parcelas.length - 1];
+    last.valor = Number((toNumberBR(last.valor || 0) + diff).toFixed(2));
+  }
+  return parcelas;
+}
+
 /** Monta as parcelas com base no pedido; se não houver, 1 parcela = total */
 function montarParcelas(pedido, valorTotal) {
   const parcelasOrig = pedido?.pagamento?.parcelas;
@@ -46,11 +58,10 @@ function montarParcelas(pedido, valorTotal) {
       })
       .filter(Boolean);
 
-    // Se somatório for válido, usa; senão cai para 1 parcela
-    const soma = pars.reduce((acc, x) => acc + x.valor, 0);
-    if (pars.length && soma > 0) return pars;
+    if (pars.length > 0) {
+      return fixSumParcelas(pars, valorTotal);
+    }
   }
-
   // fallback: 1 parcela
   return [{ dias: 0, valor: valorTotal }];
 }
@@ -93,7 +104,7 @@ function gerarPayloadOrdemCompra(dados) {
   const observacoes = pedido?.observacoes || 'Gerado automaticamente';
   const observacoesInternas = 'OC gerada automaticamente via IA';
 
-  // Monta payload mínimo/seguro para V3
+  // Payload mínimo/seguro para V3
   const payload = {
     data,
     dataPrevista,
