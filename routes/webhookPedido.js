@@ -9,25 +9,17 @@ const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
 const { getPedidoCompletoById } = require('../services/tinyPedidoService');
 
-// ✅ NOVO: serviço unificado V3→V2
+// ✅ novo import unificado
 const { listarTodosFornecedoresUnificado } = require('../services/fornecedorService');
 
-// ✅ Opcional: alerta WhatsApp quando IA falhar
-const { enviarWhatsappErro } = require('../services/whatsAppService');
-
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const pedidosProcessados = new Set();
 
 function normalizarTexto(txt) {
-  return txt
-    ?.normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-zA-Z0-9]/g, '')
-    .toLowerCase()
-    .trim();
+  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
 }
 
 router.post('/', async (req, res) => {
-  // responde imediatamente ao webhook
   res.status(200).send('Webhook recebido ✅');
 
   try {
@@ -53,7 +45,6 @@ router.post('/', async (req, res) => {
       return;
     }
 
-    // Pedido completo (com retries internos)
     console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido}...`);
     const pedido = await getPedidoCompletoById(idPedido);
 
@@ -69,7 +60,7 @@ router.post('/', async (req, res) => {
 
     console.log(`📄 Pedido completo recebido:\n`, JSON.stringify(pedido, null, 2));
 
-    // ✅ Lista fornecedores via serviço unificado (V3 com fallback V2)
+    // ✅ usa o serviço unificado (V3 com fallback V2, paginação, 429 retry, dedupe)
     const fornecedores = await listarTodosFornecedoresUnificado({ pageSize: 100 });
     const resultados = [];
 
@@ -84,45 +75,40 @@ router.post('/', async (req, res) => {
       const marca = produto.marca?.nome?.trim();
       if (!marca) continue;
 
-      // Match direto/heurístico local
       const marcaNormalizada = normalizarTexto(marca);
-      const nomePadrao = `fornecedor ${marcaNormalizada}`; // usamos minúsculo na comparação
-      let fornecedorSelecionado = fornecedores.find(
-        (f) => normalizarTexto(f.nome) === nomePadrao
+      const nomePadrao = `fornecedor ${marcaNormalizada}`; // compara já normalizado
+      let fornecedorSelecionado = fornecedores.find(f =>
+        normalizarTexto(f.nome) === nomePadrao
       );
 
       if (!fornecedorSelecionado) {
-        fornecedorSelecionado = fornecedores.find((f) => {
-          const nomeFornecedor = normalizarTexto(f.nome.replace('fornecedor', '').trim());
+        fornecedorSelecionado = fornecedores.find(f => {
+          const nome = normalizarTexto(f.nome);
           return (
-            nomeFornecedor.includes(marcaNormalizada) ||
-            marcaNormalizada.includes(nomeFornecedor)
+            nome.includes(marcaNormalizada) ||
+            marcaNormalizada.includes(nome.replace('fornecedor', '').trim())
           );
         });
       }
 
-      // 🔁 Fallback IA (resposta achatada)
       if (!fornecedorSelecionado) {
+        // fallback IA
         const respostaIA = await analisarPedidoViaIA(
           {
-            produtoSKU: sku,
-            marca,
+            produto: produto,
             quantidade: item.quantidade || 1,
-            valorUnitario: item.valorUnitario || item.valor_unitario || 0
+            valorUnitario: item.valorUnitario || item.valor_unitario || 0,
+            marca
           },
           fornecedores
         );
 
-        if (respostaIA?.deveGerarOC && typeof respostaIA?.idFornecedor === 'number') {
-          fornecedorSelecionado = fornecedores.find((f) => Number(f.id) === Number(respostaIA.idFornecedor));
+        // a função retorna um JSON; pegamos o primeiro item válido
+        const escolha = Array.isArray(respostaIA?.itens) ? respostaIA.itens[0] : null;
+        if (escolha?.deveGerarOC && typeof escolha?.idFornecedor === 'number') {
+          fornecedorSelecionado = fornecedores.find(f => Number(f.id) === Number(escolha.idFornecedor));
         } else {
           console.warn(`⚠️ Pedido ${numeroPedido} – IA não encontrou fornecedor para SKU ${sku}`);
-          // opcional: alerta no WhatsApp para triagem manual
-          try {
-            await enviarWhatsappErro?.(
-              `⚠️ Pedido ${numeroPedido}: IA não retornou fornecedor confiável para SKU ${sku} (marca: ${marca}).`
-            );
-          } catch {}
           continue;
         }
       }
@@ -138,7 +124,6 @@ router.post('/', async (req, res) => {
         produto
       };
 
-      // Validação mínima antes do payload
       const obrigatorios = [
         'produtoId',
         'quantidade',
@@ -149,13 +134,13 @@ router.post('/', async (req, res) => {
         'pedido',
         'produto'
       ];
-      const faltando = obrigatorios.filter((c) => !dadosParaOC[c]);
+
+      const faltando = obrigatorios.filter(c => !dadosParaOC[c]);
       if (faltando.length) {
         console.warn(`⚠️ Campos ausentes para SKU ${sku}: ${faltando.join(', ')}`);
         continue;
       }
 
-      // Payload OC v3
       const payloadOC = gerarPayloadOrdemCompra({
         pedido: dadosParaOC.pedido,
         produto: dadosParaOC.produto,
