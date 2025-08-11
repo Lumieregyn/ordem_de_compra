@@ -10,6 +10,7 @@ const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
 const { getPedidoCompletoById } = require('../services/tinyPedidoService');
 const { validarRespostaOrdem } = require('../services/validarRespostaOrdemService');
+const { buscarFornecedorPorMarcaV3 } = require('../services/tinyFornecedorService'); // ✅ novo
 const axios = require('axios');
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -35,6 +36,7 @@ function agruparItensPorMarca(itensComMarca) {
   return grupos;
 }
 
+// (deixei a função abaixo intacta; não é mais usada para esse match, mas mantida)
 async function listarTodosFornecedores() {
   const token = await getAccessToken();
   if (!token) return [];
@@ -69,7 +71,6 @@ router.post('/', async (req, res) => {
     const idPedido = req.body?.dados?.id;
     const numeroRecebido = req.body?.dados?.numero;
 
-    // Não dispara WhatsApp aqui! Apenas log ou status HTTP:
     if (!idPedido || !numeroRecebido) {
       return res.status(200).json({ mensagem: 'Webhook ignorado: dados incompletos.' });
     }
@@ -103,7 +104,7 @@ router.post('/', async (req, res) => {
       return res.status(200).json({ mensagem: 'Nenhuma OC será gerada. Itens são de estoque.' });
     }
 
-    const fornecedores = await listarTodosFornecedores();
+    // 🔽 🔽 🔽 Enriquecimento por produto/marca
     const itensEnriquecidos = [];
 
     for (const item of itensFiltrados) {
@@ -131,19 +132,22 @@ router.post('/', async (req, res) => {
     const resultados = [];
 
     for (const [marca, itensDaMarca] of Object.entries(agrupadosPorMarca)) {
-      const marcaNorm = normalizarTexto(marca);
-      let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
-        || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
+      // ✅ Busca DIRETA na Tiny por "FORNECEDOR <MARCA>" (sem listar todos)
+      let fornecedor = await buscarFornecedorPorMarcaV3(marca);
 
-      // Fluxo de IA para escolher fornecedor (mantido)
+      // Fallback via IA (mantido, mas sem lista massiva)
       if (!fornecedor) {
-        const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
-        if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
-          fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
+        const respostaIA = await analisarPedidoViaIA({
+          marca,
+          produtoSKU: itensDaMarca[0].sku,
+          fornecedores: [] // sem lista carregada
+        });
+        // se a IA devolver o nome completo, podemos tentar outra busca:
+        if (respostaIA?.nomeFornecedor) {
+          fornecedor = await buscarFornecedorPorMarcaV3(respostaIA.nomeFornecedor.replace(/^FORNECEDOR\s+/i, ''));
         }
       }
 
-      // ⚠️ Aqui ÚNICO caso onde WhatsApp pode ser disparado antes da OC:
       if (!fornecedor) {
         const skus = itensDaMarca.map(i => i.sku).join(', ');
         await validarRespostaOrdem(
@@ -164,7 +168,7 @@ router.post('/', async (req, res) => {
       });
 
       if (!payloadOC || !payloadOC.itens?.length) {
-        continue; // Simplesmente ignora payload inválido
+        continue; // Ignora payload inválido
       }
 
       try {
@@ -173,7 +177,6 @@ router.post('/', async (req, res) => {
 
         resultados.push({ marca, fornecedor: fornecedor.nome, status: sucesso ? 'OK' : 'Falha' });
       } catch (erroEnvio) {
-        // Se falhar mesmo assim, não dispara WhatsApp aqui!
         console.error(`❌ Erro ao enviar OC da marca ${marca} no pedido ${numeroPedido}`, erroEnvio);
       }
     }
@@ -181,7 +184,6 @@ router.post('/', async (req, res) => {
     return res.status(200).json({ mensagem: 'OC(s) processada(s)', resultados });
 
   } catch (err) {
-    // Erros genéricos: só log, sem WhatsApp
     console.error('❌ Erro geral ao processar webhook:', err);
     return res.status(500).json({ erro: 'Erro interno no processamento do webhook.' });
   }
