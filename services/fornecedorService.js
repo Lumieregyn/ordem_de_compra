@@ -8,11 +8,18 @@ const V3_BASE = process.env.TINY_V3_BASE_URL || 'https://erp.tiny.com.br/public-
 const V2_BASE = process.env.TINY_V2_BASE_URL || 'https://api.tiny.com.br/api2';
 const DEFAULT_DELAY_MS = Number(process.env.FORNECEDOR_REQUEST_DELAY_MS || 250);
 
+// ⏱️ timeouts e cache
+const REQUEST_TIMEOUT_MS = Number(process.env.FORNECEDOR_TIMEOUT_MS || 12000);
+const CACHE_TTL_MS = Number(process.env.FORNECEDOR_CACHE_TTL_MS || 120000); // 2 min
+
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const isPJ = (t) => String(t || '').trim().toUpperCase() === 'J';
 const isFornecedorPadrao = (nome) =>
   typeof nome === 'string' && nome.trim().toUpperCase().startsWith('FORNECEDOR ');
+
+// single-flight + TTL cache
+let _fornCache = { data: null, at: 0, promise: null };
 
 async function with429Retry(fn, { maxRetries = 3, baseDelay = 500 } = {}) {
   let attempt = 0;
@@ -42,7 +49,7 @@ async function listarFornecedoresV3(opts = {}) {
   const headers = { Authorization: `Bearer ${token}` };
   const fornecedores = new Map();
 
-  // ✅ aceita nomes variados e padroniza para a V3
+  // aceita diferentes nomes de entrada e padroniza
   const pageSize = Number(opts.tamanhoPagina || opts.pageSize || opts.limit || 100);
   let pagina = 1;
 
@@ -55,10 +62,12 @@ async function listarFornecedoresV3(opts = {}) {
       nome: 'FORNECEDOR',  // prefixo; reforçamos client-side
     };
 
-    const resp = await with429Retry(() => axios.get(url, { headers, params }));
+    const resp = await with429Retry(() =>
+      axios.get(url, { headers, params, timeout: REQUEST_TIMEOUT_MS })
+    );
     const payload = resp.data;
 
-    // ✅ aceita variações do payload da V3
+    // Estruturas comuns na V3: itens | data.itens | data | contacts
     const itens =
       payload?.itens ||
       payload?.data?.itens ||
@@ -88,7 +97,7 @@ async function listarFornecedoresV3(opts = {}) {
       fornecedores.set(String(id), { id: String(id), nome, tipoPessoa: 'J', ...resto });
     }
 
-    // ✅ última página quando vier menos que o tamanho solicitado
+    // última página quando vier menos que o tamanho solicitado
     if (lista.length < pageSize) break;
     pagina++;
     if (DEFAULT_DELAY_MS > 0) await sleep(DEFAULT_DELAY_MS);
@@ -115,7 +124,10 @@ async function listarFornecedoresV2({ pageSize = 100 } = {}) {
     });
 
     const resp = await with429Retry(() =>
-      axios.post(url, body, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+      axios.post(url, body, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: REQUEST_TIMEOUT_MS
+      })
     );
 
     const lista = resp.data?.retorno?.fornecedores || [];
@@ -145,18 +157,45 @@ async function listarFornecedoresV2({ pageSize = 100 } = {}) {
   return Array.from(fornecedores.values());
 }
 
-// ---------------- Unificado ----------------
+// ---------------- Unificado (com cache e single-flight) ----------------
 async function listarTodosFornecedoresUnificado(opts = {}) {
-  try {
-    const v3 = await listarFornecedoresV3(opts);
-    if (v3?.length) return v3;
-    console.warn('[fornecedorService] V3 sem resultados; tentando V2…');
-  } catch (e) {
-    console.warn(`[fornecedorService] Falha V3 → Fallback V2. Motivo: ${e?.message || e}`);
+  // TTL cache
+  const now = Date.now();
+  if (_fornCache.data && now - _fornCache.at < CACHE_TTL_MS) {
+    return _fornCache.data;
+  }
+  // single-flight
+  if (_fornCache.promise) {
+    return _fornCache.promise;
   }
 
-  const v2 = await listarFornecedoresV2(opts); // lança em erro crítico
-  return v2;
+  _fornCache.promise = (async () => {
+    try {
+      // tenta V3
+      const v3 = await listarFornecedoresV3(opts);
+      _fornCache.data = v3;
+      _fornCache.at = Date.now();
+      return v3;
+    } catch (e) {
+      console.warn(`[fornecedorService] Falha V3 → Fallback V2. Motivo: ${e?.message || e}`);
+      try {
+        const v2 = await listarFornecedoresV2(opts);
+        _fornCache.data = v2;
+        _fornCache.at = Date.now();
+        return v2;
+      } catch (e2) {
+        console.warn(`[fornecedorService] Falha V2 também. Motivo: ${e2?.message || e2}`);
+        // fallback suave: devolve lista vazia (webhook já lida com isso)
+        _fornCache.data = [];
+        _fornCache.at = Date.now();
+        return [];
+      }
+    } finally {
+      _fornCache.promise = null;
+    }
+  })();
+
+  return _fornCache.promise;
 }
 
 module.exports = {
