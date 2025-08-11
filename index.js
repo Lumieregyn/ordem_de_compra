@@ -7,12 +7,6 @@ const { processarProdutosTiny } = require('./services/tinyService');
 const { inferirMarcaViaIA } = require('./services/openaiMarcaService');
 const { getProdutoFromTinyV3 } = require('./services/tinyProductService');
 
-// ✅ opcional: alerta se o token faltar
-let enviarWhatsappErro = null;
-try {
-  ({ enviarWhatsappErro } = require('./services/whatsAppService'));
-} catch (_) { /* sem WhatsApp, segue sem alerta */ }
-
 const listarMarcasRoute = require('./routes/listarMarcas');
 const webhookPedidoRoute = require('./routes/webhookPedido');
 const tokenDebugRoute = require('./routes/tokenDebug');
@@ -58,22 +52,6 @@ app.get('/testar-marca-ia/:id', async (req, res) => {
 app.use('/listar-marcas', listarMarcasRoute);
 app.use('/webhook-pedido', webhookPedidoRoute);
 // 🔁 app.use('/selecionar-fornecedor', selecionarFornecedorRoute); // REMOVIDO TEMPORARIAMENTE
-
-// 🔄 Keep-alive do token: “nunca expira na prática”
-const KEEPALIVE_MS = 5 * 60 * 1000; // 5 minutos
-setInterval(async () => {
-  try {
-    const token = await getAccessToken();
-    if (!token && typeof enviarWhatsappErro === 'function') {
-      await enviarWhatsappErro('⚠️ Tiny OAuth2: access_token ausente. Refaça /auth para renovar as credenciais.');
-    }
-  } catch (e) {
-    console.error('❌ Falha no keep-alive do token:', e.message);
-    if (typeof enviarWhatsappErro === 'function') {
-      await enviarWhatsappErro(`❌ Tiny OAuth2: erro ao manter token vivo: ${e.message}`);
-    }
-  }
-}, KEEPALIVE_MS);
 
 app.listen(PORT, () => {
   console.log(`🌐 Servidor rodando na porta ${PORT}`);

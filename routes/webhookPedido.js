@@ -1,4 +1,5 @@
-// routes/webhookPedido.js
+// routes/webhookPedido.js - Versão limpa, WhatsApp só via IA do validarRespostaOrdem.js
+
 const express = require('express');
 const router = express.Router();
 
@@ -8,177 +9,181 @@ const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
 const { getPedidoCompletoById } = require('../services/tinyPedidoService');
-const { listarTodosFornecedoresUnificado } = require('../services/fornecedorService');
+const { validarRespostaOrdem } = require('../services/validarRespostaOrdemService');
+const axios = require('axios');
 
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const pedidosProcessados = new Set();
-const LOOP_DELAY_MS = Number(process.env.WEBHOOK_ITEM_DELAY_MS || 200);
-const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
+const MAX_PAGINAS = 10;
 
 function normalizarTexto(txt) {
-  return String(txt || '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9]/g, '')
-    .toLowerCase().trim();
+  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
 }
 
-// "2.016,84" | "2016,84" | 2016.84 -> 2016.84
-function toNumberBR(v) {
-  if (v == null) return null;
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  const s = String(v).trim();
-  const normalized = s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s;
-  const n = Number(normalized);
-  return Number.isFinite(n) ? n : null;
+function filtrarItensNecessarios(itens) {
+  return itens.filter(item => item.produto?.sku?.toUpperCase().includes('PEDIDO'));
+}
+
+function agruparItensPorMarca(itensComMarca) {
+  const grupos = {};
+  for (const item of itensComMarca) {
+    const marca = item.marca || 'DESCONHECIDA';
+    if (!grupos[marca]) grupos[marca] = [];
+    grupos[marca].push(item);
+  }
+  return grupos;
+}
+
+async function listarTodosFornecedores() {
+  const token = await getAccessToken();
+  if (!token) return [];
+
+  const todos = [];
+  let page = 1;
+  const limit = 50;
+
+  try {
+    while (page <= MAX_PAGINAS) {
+      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=J&nome=FORNECEDOR&page=${page}&limit=${limit}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      const contatosPagina = response.data.itens || [];
+      if (!contatosPagina.length) break;
+
+      todos.push(...contatosPagina);
+      page++;
+      await delay(500);
+    }
+
+    return Array.from(new Map(todos.map(f => [f.id, f])).values());
+  } catch (err) {
+    console.error('❌ Erro ao buscar fornecedores:', err.message);
+    return [];
+  }
 }
 
 router.post('/', async (req, res) => {
-  res.status(200).send('Webhook recebido ✅');
-
   try {
     const idPedido = req.body?.dados?.id;
-    const numeroPedido = req.body?.dados?.numero;
+    const numeroRecebido = req.body?.dados?.numero;
 
-    console.log(`📥 Webhook recebido: ID ${idPedido}, Número ${numeroPedido}`);
-    if (!idPedido || !numeroPedido) {
-      console.warn('❌ Webhook sem ID ou número de pedido válido');
-      return;
+    // Não dispara WhatsApp aqui! Apenas log ou status HTTP:
+    if (!idPedido || !numeroRecebido) {
+      return res.status(200).json({ mensagem: 'Webhook ignorado: dados incompletos.' });
     }
 
     if (pedidosProcessados.has(idPedido)) {
-      console.warn(`⏩ Pedido ID ${idPedido} já processado. Ignorando duplicado.`);
-      return;
+      return res.status(200).json({ mensagem: 'Pedido já processado anteriormente.' });
     }
-    pedidosProcessados.add(idPedido);
 
     const token = await getAccessToken();
     if (!token) {
-      console.error('❌ Token OAuth2 indisponível.');
-      return;
+      return res.status(500).json({ erro: 'Token indisponível.' });
     }
 
-    console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido}...`);
     const pedido = await getPedidoCompletoById(idPedido);
-    if (!pedido?.id || !pedido?.numeroPedido) {
-      console.warn(`⚠️ Dados incompletos do pedido retornado. ID: ${idPedido}`);
-      return;
-    }
-    if (!Array.isArray(pedido.itens) || pedido.itens.length === 0) {
-      console.warn(`⚠️ Pedido ${numeroPedido} sem itens. Ignorando.`);
-      return;
+    const numeroPedido = pedido?.numeroPedido || '[sem número]';
+
+    if (!pedido || !pedido.id || !pedido.numeroPedido || pedido.situacao === undefined) {
+      return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
     }
 
-    console.log(`📄 Pedido completo recebido:\n`, JSON.stringify(pedido, null, 2));
+    if (pedido.situacao !== 3) {
+      return res.status(200).json({
+        mensagem: `Pedido ${numeroPedido} com situação ${pedido.situacao} não será processado.`
+      });
+    }
 
-    const fornecedores = await listarTodosFornecedoresUnificado({ pageSize: 100 });
-    console.log(`📚 Fornecedores carregados: ${fornecedores.length}`);
+    pedidosProcessados.add(idPedido);
 
+    const itensFiltrados = filtrarItensNecessarios(pedido.itens);
+    if (itensFiltrados.length === 0) {
+      return res.status(200).json({ mensagem: 'Nenhuma OC será gerada. Itens são de estoque.' });
+    }
+
+    const fornecedores = await listarTodosFornecedores();
+    const itensEnriquecidos = [];
+
+    for (const item of itensFiltrados) {
+      try {
+        const produtoId = item.produto?.id;
+        const quantidade = item.quantidade || 1;
+        const valorUnitario = item.valorUnitario || item.valor_unitario || 0;
+
+        if (!produtoId) continue;
+
+        const produto = await getProdutoFromTinyV3(produtoId);
+        if (!produto) continue;
+
+        const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
+        const marca = produto.marca?.nome?.trim();
+        if (!marca) continue;
+
+        itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
+      } catch (erroProduto) {
+        console.error(`❌ Erro ao buscar produto do item:`, erroProduto);
+      }
+    }
+
+    const agrupadosPorMarca = agruparItensPorMarca(itensEnriquecidos);
     const resultados = [];
 
-    for (const item of pedido.itens) {
-      const produtoId = item?.produto?.id;
-      if (!produtoId) continue;
-
-      const produto = await getProdutoFromTinyV3(produtoId);
-      if (!produto) continue;
-
-      const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
-      const marca = produto?.marca?.nome?.trim();
-      if (!marca) continue;
-
-      // ---------- Seleção de fornecedor ----------
+    for (const [marca, itensDaMarca] of Object.entries(agrupadosPorMarca)) {
       const marcaNorm = normalizarTexto(marca);
-      const alvoExato = normalizarTexto(`FORNECEDOR ${marca}`);
-      let fornecedorSelecionado =
-        fornecedores.find((f) => normalizarTexto(f.nome) === alvoExato) ||
-        fornecedores.find((f) => {
-          const nome = normalizarTexto(f.nome).replace(/^fornecedor/, '').trim();
-          return nome.includes(marcaNorm) || marcaNorm.includes(nome);
-        });
+      let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
+        || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
 
-      if (!fornecedorSelecionado) {
-        // fallback IA
-        const respostaIA = await analisarPedidoViaIA(
-          {
-            produto,
-            quantidade: item.quantidade ?? 1,
-            valorUnitario: item.valorUnitario ?? item.valor_unitario ?? item['valorUnitário'] ?? item.valor ?? null,
-            marca,
-          },
-          fornecedores
-        );
-
-        const escolha =
-          (Array.isArray(respostaIA?.itens) && respostaIA.itens[0]) ||
-          (respostaIA && typeof respostaIA === 'object' ? respostaIA : null);
-
-        if (escolha?.deveGerarOC && escolha?.idFornecedor != null) {
-          fornecedorSelecionado = fornecedores.find((f) => Number(f.id) === Number(escolha.idFornecedor));
-        } else {
-          console.warn(`⚠️ Pedido ${numeroPedido} – IA não encontrou fornecedor para SKU ${sku}`);
-          continue;
+      // Fluxo de IA para escolher fornecedor (mantido)
+      if (!fornecedor) {
+        const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
+        if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
+          fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
         }
       }
 
-      // ---------- Valor/Quantidade robustos ----------
-      const valorUnitRaw =
-        item.valorUnitario ??
-        item.valor_unitario ??
-        item['valorUnitário'] ??
-        item.valor ?? null;
-
-      const quantidadeRaw = item.quantidade ?? item.qtd ?? 1;
-
-      const valorUnitario = toNumberBR(valorUnitRaw);
-      const quantidade = toNumberBR(quantidadeRaw) ?? 1;
-
-      const dadosParaOC = {
-        produtoId: produto.id,
-        quantidade,
-        valorUnitario,
-        sku,
-        idFornecedor: fornecedorSelecionado?.id,
-        nomeFornecedor: fornecedorSelecionado?.nome,
-        pedido,
-        produto,
-      };
-
-      const obrigatorios = [
-        'produtoId', 'quantidade', 'valorUnitario', 'sku', 'idFornecedor', 'nomeFornecedor', 'pedido', 'produto'
-      ];
-      const faltando = obrigatorios.filter((c) => {
-        const v = dadosParaOC[c];
-        if (v == null) return true;
-        if ((c === 'quantidade' || c === 'valorUnitario') && !(Number(v) > 0)) return true;
-        return false;
-      });
-      if (faltando.length) {
-        console.warn(`⚠️ Campos ausentes/invalidos para SKU ${sku}: ${faltando.join(', ')}`, {
-          debugValor: { quantidade, valorUnitario, bruto: valorUnitRaw },
-        });
+      // ⚠️ Aqui ÚNICO caso onde WhatsApp pode ser disparado antes da OC:
+      if (!fornecedor) {
+        const skus = itensDaMarca.map(i => i.sku).join(', ');
+        await validarRespostaOrdem(
+          { retorno: { mensagem: 'Nenhum fornecedor identificado', detalhes: skus } },
+          numeroPedido,
+          marca,
+          null
+        );
         continue;
       }
 
       const payloadOC = gerarPayloadOrdemCompra({
-        pedido: dadosParaOC.pedido,
-        produto: dadosParaOC.produto,
-        sku: dadosParaOC.sku,
-        quantidade: dadosParaOC.quantidade,
-        valorUnitario: dadosParaOC.valorUnitario,
-        idFornecedor: dadosParaOC.idFornecedor,
+        numeroPedido: pedido.numeroPedido,
+        nomeCliente: pedido.cliente?.nome || '',
+        dataPrevista: pedido.dataPrevista,
+        itens: itensDaMarca,
+        fornecedor
       });
 
-      // log útil pra depurar se a Tiny reclamar
-      console.log('🧾 Payload OC (preview):', JSON.stringify(payloadOC, null, 2));
+      if (!payloadOC || !payloadOC.itens?.length) {
+        continue; // Simplesmente ignora payload inválido
+      }
 
-      const resposta = await enviarOrdemCompra(payloadOC);
-      resultados.push({ sku, fornecedor: fornecedorSelecionado.nome, status: resposta });
+      try {
+        const resposta = await enviarOrdemCompra(payloadOC);
+        const sucesso = await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
 
-      if (LOOP_DELAY_MS > 0) await delay(LOOP_DELAY_MS);
+        resultados.push({ marca, fornecedor: fornecedor.nome, status: sucesso ? 'OK' : 'Falha' });
+      } catch (erroEnvio) {
+        // Se falhar mesmo assim, não dispara WhatsApp aqui!
+        console.error(`❌ Erro ao enviar OC da marca ${marca} no pedido ${numeroPedido}`, erroEnvio);
+      }
     }
 
-    console.log(`📦 Resultado final do processamento:\n`, resultados);
+    return res.status(200).json({ mensagem: 'OC(s) processada(s)', resultados });
+
   } catch (err) {
-    console.error('❌ Erro geral no webhook:', err.message || err);
+    // Erros genéricos: só log, sem WhatsApp
+    console.error('❌ Erro geral ao processar webhook:', err);
+    return res.status(500).json({ erro: 'Erro interno no processamento do webhook.' });
   }
 });
 

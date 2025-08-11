@@ -1,130 +1,83 @@
-// services/gerarPayloadOC.js
-const { addBusinessDays } = require('date-fns');
-
-/** Converte "2.016,84" | "2016,84" | 2016.84 -> 2016.84 (number) */
-function toNumberBR(v) {
-  if (v == null) return null;
-  if (typeof v === 'number' && Number.isFinite(v)) return Number(v.toFixed(2));
-  const s = String(v).trim();
-  const normalized = s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s;
-  const n = Number(normalized);
-  return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
-}
-
-/** Pega melhor data do pedido (com fallbacks) e retorna YYYY-MM-DD */
-function pickDataPedido(pedido) {
-  const candidatas = [
-    pedido?.data,
-    pedido?.dados,
-    pedido?.dataEmissao,
-    pedido?.dataFaturamento,
-  ].filter(Boolean);
-
-  const toISO = (d) => {
-    const dt = new Date(d);
-    return isNaN(dt) ? null : dt.toISOString().slice(0, 10);
-  };
-
-  for (const d of candidatas) {
-    const iso = toISO(d);
-    if (iso) return iso;
-  }
-  return new Date().toISOString().slice(0, 10);
-}
-
-/** Ajusta parcelas para que a soma == valorTotal (corrige centavos na última) */
-function fixSumParcelas(parcelas, valorTotal) {
-  const somado = parcelas.reduce((acc, p) => acc + toNumberBR(p.valor || 0), 0);
-  const diff = Number((valorTotal - somado).toFixed(2));
-  if (Math.abs(diff) >= 0.01) {
-    // corrige na última parcela
-    const last = parcelas[parcelas.length - 1];
-    last.valor = Number((toNumberBR(last.valor || 0) + diff).toFixed(2));
-  }
-  return parcelas;
-}
-
-/** Monta as parcelas com base no pedido; se não houver, 1 parcela = total */
-function montarParcelas(pedido, valorTotal) {
-  const parcelasOrig = pedido?.pagamento?.parcelas;
-  if (Array.isArray(parcelasOrig) && parcelasOrig.length > 0) {
-    const pars = parcelasOrig
-      .map((p) => {
-        const dias = Number(p?.dias ?? 0);
-        const valor = toNumberBR(p?.valor);
-        return (Number.isFinite(dias) && valor != null && valor >= 0)
-          ? { dias, valor }
-          : null;
-      })
-      .filter(Boolean);
-
-    if (pars.length > 0) {
-      return fixSumParcelas(pars, valorTotal);
-    }
-  }
-  // fallback: 1 parcela
-  return [{ dias: 0, valor: valorTotal }];
-}
-
 /**
- * Gera o payload da Ordem de Compra (Tiny v3).
- * @param {Object} dados - { pedido, produto, sku, quantidade, valorUnitario, idFornecedor }
+ * Gera o payload da Ordem de Compra no padrão Tiny v3 para um grupo de itens por marca.
+ * @param {Object} dados - Contém: numeroPedido, nomeCliente, dataPrevista, itens[], fornecedor
+ * @returns {Object} payload JSON final
  */
 function gerarPayloadOrdemCompra(dados) {
-  const { pedido, produto, sku, quantidade, valorUnitario, idFornecedor } = dados;
+  const {
+    numeroPedido,
+    nomeCliente,
+    dataPrevista,
+    itens,
+    fornecedor
+  } = dados;
 
-  // Validação essencial
-  const faltando = [];
-  if (!pedido) faltando.push('pedido');
-  if (!produto?.id) faltando.push('produto.id');
-  if (!sku) faltando.push('sku');
-  const qtd = toNumberBR(quantidade);
-  const val = toNumberBR(valorUnitario);
-  if (!(qtd > 0)) faltando.push('quantidade (>0)');
-  if (!(val > 0)) faltando.push('valorUnitario (>0)');
-  if (!idFornecedor) faltando.push('idFornecedor');
-
-  if (faltando.length) {
-    console.warn('[Bloco 5 ⚠️] Campos ausentes:', faltando);
-    throw new Error('Dados obrigatórios ausentes para gerar OC');
+  // ⚠️ Validação básica
+  if (!numeroPedido || !Array.isArray(itens) || itens.length === 0 || !fornecedor?.id) {
+    console.warn('[Bloco 4 ⚠️] Dados incompletos para geração da OC');
+    throw new Error('Bloco 4: dados incompletos');
   }
 
-  // Datas
-  const data = pickDataPedido(pedido);
-  const diasPreparacao = Number(produto?.diasPreparacao ?? 5);
-  const dataPrevista = addBusinessDays(new Date(data), isNaN(diasPreparacao) ? 5 : diasPreparacao)
-    .toISOString()
-    .slice(0, 10);
+  // 🗓️ Fallback para dataPrevista
+  const dataPrevistaFinal = dataPrevista?.trim() !== ''
+    ? dataPrevista
+    : new Date().toISOString().split('T')[0];
 
-  // Totais
-  const valorTotal = Number((qtd * val).toFixed(2));
-  const parcelas = montarParcelas(pedido, valorTotal);
+  // 🎯 Validar e montar os itens
+  const itensValidos = itens
+    .filter(item => item?.produto?.id && item?.quantidade && item?.valorUnitario)
+    .map(item => ({
+      produto: { id: parseInt(item.produto.id) },
+      quantidade: item.quantidade,
+      valor: item.valorUnitario,
+      informacoesAdicionais: `SKU: ${item.sku || '---'} / Fornecedor: ${fornecedor.nome}`,
+      aliquotaIPI: 0,
+      valorICMS: 0
+    }));
 
-  // Observações
-  const observacoes = pedido?.observacoes || 'Gerado automaticamente';
-  const observacoesInternas = 'OC gerada automaticamente via IA';
+  if (itensValidos.length === 0) {
+    console.warn('[Bloco 4 ⚠️] Nenhum item válido para gerar OC.');
+    throw new Error('Bloco 4: Nenhum item válido no grupo');
+  }
 
-  // Payload mínimo/seguro para V3
-  const payload = {
-    data,
-    dataPrevista,
-    observacoes,
-    observacoesInternas,
-    contato: { id: idFornecedor },
-    parcelas,
-    itens: [
-      {
-        produto: { id: produto.id },
-        quantidade: qtd,
-        valor: val,
-        informacoesAdicionais: `SKU: ${sku} / Fornecedor: ${produto?.marca?.nome || '---'}`,
-        aliquotaIPI: 0,
-        valorICMS: 0,
-      },
-    ],
+  // 💰 Total da parcela
+  const valorTotal = itensValidos.reduce(
+    (total, item) => total + (item.quantidade * item.valor),
+    0
+  ).toFixed(2);
+
+  const parcela = {
+    dias: 30,
+    valor: Number(valorTotal),
+    meioPagamento: "1",
+    observacoes: "Pagamento único"
   };
 
+  // 🧾 Observações padronizadas
+  const observacoes = [
+    'OC gerada automaticamente via IA',
+    `Pedido de Venda: ${numeroPedido}`,
+    `Cliente: ${nomeCliente}`
+  ].join('\n');
+
+  // 📦 Payload final
+  const payload = {
+    data: new Date().toISOString().split('T')[0],
+    dataPrevista: dataPrevistaFinal,
+    condicao: "A prazo 30 dias",
+    fretePorConta: "Destinatário",
+    observacoes,
+    observacoesInternas: `OC gerada automaticamente para fornecedor ${fornecedor.nome} / Pedido ${numeroPedido}`,
+    contato: { id: fornecedor.id },
+    categoria: { id: 0 },
+    parcelas: [parcela],
+    itens: itensValidos
+  };
+
+  console.log('🔧 Payload OC gerado:', JSON.stringify(payload, null, 2));
   return payload;
 }
 
-module.exports = { gerarPayloadOrdemCompra };
+module.exports = {
+  gerarPayloadOrdemCompra
+};
