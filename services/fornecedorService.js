@@ -3,7 +3,8 @@ const axios = require('axios');
 const qs = require('querystring');
 const { getAccessToken } = require('./tokenService');
 
-const V3_BASE = process.env.TINY_V3_BASE_URL || 'https://api.tiny.com.br/public-api/v3';
+// ✅ Padroniza com os demais serviços V3 do projeto
+const V3_BASE = process.env.TINY_V3_BASE_URL || 'https://erp.tiny.com.br/public-api/v3';
 const V2_BASE = process.env.TINY_V2_BASE_URL || 'https://api.tiny.com.br/api2';
 const DEFAULT_DELAY_MS = Number(process.env.FORNECEDOR_REQUEST_DELAY_MS || 250);
 
@@ -34,29 +35,33 @@ async function with429Retry(fn, { maxRetries = 3, baseDelay = 500 } = {}) {
 }
 
 // ---------------- V3 ----------------
-async function listarFornecedoresV3({ limit = 100 } = {}) {
+async function listarFornecedoresV3(opts = {}) {
   const token = await getAccessToken();
   if (!token) throw new Error('Token OAuth2 ausente para V3.');
 
   const headers = { Authorization: `Bearer ${token}` };
   const fornecedores = new Map();
-  let page = 1;
+
+  // ✅ aceita nomes variados e padroniza para a V3
+  const pageSize = Number(opts.tamanhoPagina || opts.pageSize || opts.limit || 100);
+  let pagina = 1;
 
   while (true) {
     const url = `${V3_BASE}/contatos`;
     const params = {
-      page,
-      limit,
-      tipo: 'J',            // filtro server-side quando suportado
-      nome: 'FORNECEDOR',   // prefixo; reforçamos client-side
+      pagina,
+      tamanhoPagina: pageSize,
+      tipo: 'J',           // filtro server-side quando suportado
+      nome: 'FORNECEDOR',  // prefixo; reforçamos client-side
     };
 
     const resp = await with429Retry(() => axios.get(url, { headers, params }));
     const payload = resp.data;
 
-    // Estruturas que já vi: itens / data / contacts
+    // ✅ aceita variações do payload da V3
     const itens =
       payload?.itens ||
+      payload?.data?.itens ||
       payload?.data ||
       payload?.contacts ||
       payload ||
@@ -83,8 +88,9 @@ async function listarFornecedoresV3({ limit = 100 } = {}) {
       fornecedores.set(String(id), { id: String(id), nome, tipoPessoa: 'J', ...resto });
     }
 
-    if (lista.length < limit) break; // última página
-    page++;
+    // ✅ última página quando vier menos que o tamanho solicitado
+    if (lista.length < pageSize) break;
+    pagina++;
     if (DEFAULT_DELAY_MS > 0) await sleep(DEFAULT_DELAY_MS);
   }
 
