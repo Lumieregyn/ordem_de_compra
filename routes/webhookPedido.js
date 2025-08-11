@@ -1,3 +1,5 @@
+// routes/webhookPedido.js - Versão limpa, WhatsApp só via IA do validarRespostaOrdem.js
+
 const express = require('express');
 const router = express.Router();
 
@@ -7,202 +9,181 @@ const { analisarPedidoViaIA } = require('../services/openaiMarcaService');
 const { enviarOrdemCompra } = require('../services/enviarOrdem');
 const { gerarPayloadOrdemCompra } = require('../services/gerarPayloadOC');
 const { getPedidoCompletoById } = require('../services/tinyPedidoService');
+const { validarRespostaOrdem } = require('../services/validarRespostaOrdemService');
 const axios = require('axios');
-
-const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
-// const MAX_PAGINAS = 10;  // ❌ removido: vamos até o fim
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const pedidosProcessados = new Set();
+const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
+const MAX_PAGINAS = 10;
 
 function normalizarTexto(txt) {
-  return txt?.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
+  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
 }
 
-/**
- * ✅ AJUSTE CIRÚRGICO: Listagem completa dos fornecedores (V3)
- * - pagina até acabar (sem teto artificial)
- * - limit=100 para reduzir chamadas
- * - retry leve p/ 429/5xx/timeout
- * - dedupe por id
- */
+function filtrarItensNecessarios(itens) {
+  return itens.filter(item => item.produto?.sku?.toUpperCase().includes('PEDIDO'));
+}
+
+function agruparItensPorMarca(itensComMarca) {
+  const grupos = {};
+  for (const item of itensComMarca) {
+    const marca = item.marca || 'DESCONHECIDA';
+    if (!grupos[marca]) grupos[marca] = [];
+    grupos[marca].push(item);
+  }
+  return grupos;
+}
+
 async function listarTodosFornecedores() {
   const token = await getAccessToken();
   if (!token) return [];
 
   const todos = [];
   let page = 1;
-  const limit = 100;
-  const TIMEOUT_MS = 15000;
-  const MAX_RETRY = 3;
+  const limit = 50;
 
-  while (true) {
-    let tentativa = 0;
-    let paginaOk = false;
+  try {
+    while (page <= MAX_PAGINAS) {
+      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=J&nome=FORNECEDOR&page=${page}&limit=${limit}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
-    while (!paginaOk && tentativa < MAX_RETRY) {
-      tentativa++;
-      try {
-        const response = await axios.get(`${TINY_API_V3_BASE}/contatos`, {
-          headers: { Authorization: `Bearer ${token}` },
-          params: { tipo: 'J', nome: 'FORNECEDOR', page, limit },
-          timeout: TIMEOUT_MS,
-          validateStatus: () => true,
-        });
+      const contatosPagina = response.data.itens || [];
+      if (!contatosPagina.length) break;
 
-        const contatosPagina = response.data?.itens || [];
-        if (!Array.isArray(contatosPagina) || contatosPagina.length === 0) {
-          // fim da paginação
-          return Array.from(new Map(todos.map(f => [f.id, f])).values());
-        }
-
-        todos.push(...contatosPagina);
-        paginaOk = true;
-      } catch (err) {
-        const status = err.response?.status;
-        const elegivelRetry = status === 429 || (status >= 500) || err.code === 'ECONNABORTED';
-        if (!elegivelRetry || tentativa >= MAX_RETRY) {
-          console.error('❌ Erro ao buscar fornecedores:', status, err.message);
-          // retorna o que já coletou
-          return Array.from(new Map(todos.map(f => [f.id, f])).values());
-        }
-        // backoff exponencial simples
-        await delay(800 * Math.pow(2, tentativa - 1));
-      }
+      todos.push(...contatosPagina);
+      page++;
+      await delay(500);
     }
 
-    page++;
-    await delay(400); // pequeno respiro entre páginas
+    return Array.from(new Map(todos.map(f => [f.id, f])).values());
+  } catch (err) {
+    console.error('❌ Erro ao buscar fornecedores:', err.message);
+    return [];
   }
 }
 
 router.post('/', async (req, res) => {
-  res.status(200).send('Webhook recebido ✅');
-
   try {
     const idPedido = req.body?.dados?.id;
-    const numeroPedido = req.body?.dados?.numero;
+    const numeroRecebido = req.body?.dados?.numero;
 
-    console.log(`📥 Webhook recebido: ID ${idPedido}, Número ${numeroPedido}`);
-
-    if (!idPedido || !numeroPedido) {
-      console.warn('❌ Webhook sem ID ou número de pedido válido');
-      return;
+    // Não dispara WhatsApp aqui! Apenas log ou status HTTP:
+    if (!idPedido || !numeroRecebido) {
+      return res.status(200).json({ mensagem: 'Webhook ignorado: dados incompletos.' });
     }
 
     if (pedidosProcessados.has(idPedido)) {
-      console.warn(`⏩ Pedido ID ${idPedido} já processado anteriormente. Ignorando duplicado.`);
-      return;
+      return res.status(200).json({ mensagem: 'Pedido já processado anteriormente.' });
     }
-    pedidosProcessados.add(idPedido);
 
     const token = await getAccessToken();
     if (!token) {
-      console.error('❌ Token de acesso não disponível. Abandonando fluxo.');
-      return;
+      return res.status(500).json({ erro: 'Token indisponível.' });
     }
 
-    console.log(`📡 Buscando pedido completo via API V3: ID ${idPedido}...`);
     const pedido = await getPedidoCompletoById(idPedido);
+    const numeroPedido = pedido?.numeroPedido || '[sem número]';
 
-    if (!pedido || !pedido.id || !pedido.numeroPedido) {
-      console.warn(`⚠️ Dados incompletos do pedido retornado. ID: ${idPedido}`);
-      return;
+    if (!pedido || !pedido.id || !pedido.numeroPedido || pedido.situacao === undefined) {
+      return res.status(200).json({ mensagem: 'Pedido com dados incompletos. Ignorado.' });
     }
 
-    if (!pedido.itens || !Array.isArray(pedido.itens) || pedido.itens.length === 0) {
-      console.warn(`⚠️ Pedido ${numeroPedido} retornado sem itens. Ignorando.`);
-      return;
+    if (pedido.situacao !== 3) {
+      return res.status(200).json({
+        mensagem: `Pedido ${numeroPedido} com situação ${pedido.situacao} não será processado.`
+      });
     }
 
-    console.log(`📄 Pedido completo recebido:\n`, JSON.stringify(pedido, null, 2));
+    pedidosProcessados.add(idPedido);
+
+    const itensFiltrados = filtrarItensNecessarios(pedido.itens);
+    if (itensFiltrados.length === 0) {
+      return res.status(200).json({ mensagem: 'Nenhuma OC será gerada. Itens são de estoque.' });
+    }
 
     const fornecedores = await listarTodosFornecedores();
+    const itensEnriquecidos = [];
+
+    for (const item of itensFiltrados) {
+      try {
+        const produtoId = item.produto?.id;
+        const quantidade = item.quantidade || 1;
+        const valorUnitario = item.valorUnitario || item.valor_unitario || 0;
+
+        if (!produtoId) continue;
+
+        const produto = await getProdutoFromTinyV3(produtoId);
+        if (!produto) continue;
+
+        const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
+        const marca = produto.marca?.nome?.trim();
+        if (!marca) continue;
+
+        itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
+      } catch (erroProduto) {
+        console.error(`❌ Erro ao buscar produto do item:`, erroProduto);
+      }
+    }
+
+    const agrupadosPorMarca = agruparItensPorMarca(itensEnriquecidos);
     const resultados = [];
 
-    for (const item of pedido.itens) {
-      const produtoId = item.produto?.id;
-      if (!produtoId) continue;
+    for (const [marca, itensDaMarca] of Object.entries(agrupadosPorMarca)) {
+      const marcaNorm = normalizarTexto(marca);
+      let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
+        || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
 
-      const produto = await getProdutoFromTinyV3(produtoId);
-      if (!produto) continue;
-
-      const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
-      const marca = produto.marca?.nome?.trim();
-      if (!marca) continue;
-
-      const marcaNormalizada = normalizarTexto(marca);
-      const nomePadrao = `FORNECEDOR ${marcaNormalizada}`;
-      let fornecedorSelecionado = fornecedores.find(f =>
-        normalizarTexto(f.nome) === nomePadrao
-      );
-
-      if (!fornecedorSelecionado) {
-        fornecedorSelecionado = fornecedores.find(f =>
-          normalizarTexto(f.nome).includes(marcaNormalizada) ||
-          marcaNormalizada.includes(normalizarTexto(f.nome).replace('fornecedor', '').trim())
-        );
-      }
-
-      if (!fornecedorSelecionado) {
-        const respostaIA = await analisarPedidoViaIA({
-          produtoSKU: sku,
-          marca,
-          fornecedores
-        });
-
-        if (respostaIA?.deveGerarOC && typeof respostaIA?.idFornecedor === 'number') {
-          fornecedorSelecionado = fornecedores.find(f => f.id === respostaIA.idFornecedor);
-        } else {
-          console.warn(`⚠️ Pedido ${numeroPedido} – IA não encontrou fornecedor para SKU ${sku}`);
-          continue;
+      // Fluxo de IA para escolher fornecedor (mantido)
+      if (!fornecedor) {
+        const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
+        if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
+          fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
         }
       }
 
-      const dadosParaOC = {
-        produtoId: produto.id,
-        quantidade: item.quantidade || 1,
-        valorUnitario: item.valorUnitario || item.valor_unitario || 0,
-        sku,
-        idFornecedor: fornecedorSelecionado?.id,
-        nomeFornecedor: fornecedorSelecionado?.nome,
-        pedido,
-        produto
-      };
-
-      const obrigatorios = [
-        'produtoId',
-        'quantidade',
-        'valorUnitario',
-        'sku',
-        'idFornecedor',
-        'nomeFornecedor',
-        'pedido',
-        'produto'
-      ];
-
-      const faltando = obrigatorios.filter(c => !dadosParaOC[c]);
-      if (faltando.length) {
-        console.warn(`⚠️ Campos ausentes para SKU ${sku}: ${faltando.join(', ')}`);
+      // ⚠️ Aqui ÚNICO caso onde WhatsApp pode ser disparado antes da OC:
+      if (!fornecedor) {
+        const skus = itensDaMarca.map(i => i.sku).join(', ');
+        await validarRespostaOrdem(
+          { retorno: { mensagem: 'Nenhum fornecedor identificado', detalhes: skus } },
+          numeroPedido,
+          marca,
+          null
+        );
         continue;
       }
 
       const payloadOC = gerarPayloadOrdemCompra({
-        pedido: dadosParaOC.pedido,
-        produto: dadosParaOC.produto,
-        sku: dadosParaOC.sku,
-        quantidade: dadosParaOC.quantidade,
-        valorUnitario: dadosParaOC.valorUnitario,
-        idFornecedor: dadosParaOC.idFornecedor
+        numeroPedido: pedido.numeroPedido,
+        nomeCliente: pedido.cliente?.nome || '',
+        dataPrevista: pedido.dataPrevista,
+        itens: itensDaMarca,
+        fornecedor
       });
 
-      const resposta = await enviarOrdemCompra(payloadOC);
-      resultados.push({ sku, fornecedor: fornecedorSelecionado.nome, status: resposta });
+      if (!payloadOC || !payloadOC.itens?.length) {
+        continue; // Simplesmente ignora payload inválido
+      }
+
+      try {
+        const resposta = await enviarOrdemCompra(payloadOC);
+        const sucesso = await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
+
+        resultados.push({ marca, fornecedor: fornecedor.nome, status: sucesso ? 'OK' : 'Falha' });
+      } catch (erroEnvio) {
+        // Se falhar mesmo assim, não dispara WhatsApp aqui!
+        console.error(`❌ Erro ao enviar OC da marca ${marca} no pedido ${numeroPedido}`, erroEnvio);
+      }
     }
 
-    console.log(`📦 Resultado final do processamento:\n`, resultados);
+    return res.status(200).json({ mensagem: 'OC(s) processada(s)', resultados });
+
   } catch (err) {
-    console.error('❌ Erro geral no webhook:', err.message || err);
+    // Erros genéricos: só log, sem WhatsApp
+    console.error('❌ Erro geral ao processar webhook:', err);
+    return res.status(500).json({ erro: 'Erro interno no processamento do webhook.' });
   }
 });
 
