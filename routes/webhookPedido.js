@@ -15,7 +15,7 @@ const axios = require('axios');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const pedidosProcessados = new Set();
 const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
-const MAX_PAGINAS = 10;
+const MAX_PAGINAS = 30;
 
 function normalizarTexto(txt) {
   return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
