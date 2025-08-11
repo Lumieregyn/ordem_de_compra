@@ -8,7 +8,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function listarTodosFornecedores() {
   const fornecedoresMap = new Map();
-  const maxPaginas = 20;
+  const maxPaginas = 10;
   const delayEntreRequisicoes = 800;
 
   for (let pagina = 1; pagina <= maxPaginas; pagina++) {
