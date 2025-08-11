@@ -60,9 +60,13 @@ async function listarTodosFornecedores() {
 async function buscarFornecedorPorMarcaV3(marca) {
   if (!marca) return null;
 
-  // OBS: a v3 usa Bearer token OAuth2; aqui esperamos que você já esteja
-  // usando middleware de token/bearer em outro ponto (ex: axios interceptor).
-  // Caso não tenha, ajuste o header Authorization aqui conforme seu fluxo.
+  // ⚠️ Usa OAuth2 Bearer token da v3
+  const { getAccessToken } = require('./tokenService');
+  const token = await getAccessToken();
+  if (!token) {
+    console.error('[buscarFornecedorPorMarcaV3] Token indisponível');
+    return null;
+  }
 
   let pagina = 1;
   const tamanhoPagina = 100;
@@ -71,10 +75,7 @@ async function buscarFornecedorPorMarcaV3(marca) {
   while (true) {
     try {
       const { data } = await axios.get(`${V3_BASE}/contatos`, {
-        headers: {
-          // Se você tiver um getAccessToken(), pode injetar aqui:
-          // Authorization: `Bearer ${await getAccessToken()}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
         params: {
           pagina,
           tamanhoPagina,
