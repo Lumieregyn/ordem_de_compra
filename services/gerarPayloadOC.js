@@ -1,14 +1,14 @@
-+ // Converte "3.907,65" ou "3907,65" em number 3907.65; mantém number se já for
-+ function toNumberSafe(v) {
-+   if (typeof v === 'number') return v;
-+   if (typeof v === 'string') {
-+     const s = v.replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
-+     const n = Number(s);
-+     return Number.isFinite(n) ? n : 0;
-+   }
-+   return 0;
-+ }
- 
+// Converte "3.907,65" ou "3907,65" → 3907.65 (number). Se já for number, mantém.
+function toNumberSafe(v) {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') {
+    const s = v.replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
  function gerarPayloadOrdemCompra(dados) {
    const {
      pedido,
