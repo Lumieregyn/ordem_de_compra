@@ -1,4 +1,4 @@
-// routes/webhookPedido.js - Versão limpa, WhatsApp só via IA do validarRespostaOrdem.js
+// routes/webhookPedido.js - Versão ajustada (listagem V3, guardrail e match robusto)
 
 const express = require('express');
 const router = express.Router();
@@ -18,11 +18,16 @@ const TINY_API_V3_BASE = 'https://erp.tiny.com.br/public-api/v3';
 const MAX_PAGINAS = 10;
 
 function normalizarTexto(txt) {
-  return txt?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().trim();
+  return String(txt || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase().trim();
 }
 
 function filtrarItensNecessarios(itens) {
-  return itens.filter(item => item.produto?.sku?.toUpperCase().includes('PEDIDO'));
+  return (Array.isArray(itens) ? itens : []).filter(item =>
+    String(item?.produto?.sku || '').toUpperCase().includes('PEDIDO')
+  );
 }
 
 function agruparItensPorMarca(itensComMarca) {
@@ -35,29 +40,41 @@ function agruparItensPorMarca(itensComMarca) {
   return grupos;
 }
 
+// ===== Listagem de fornecedores (V3) com paginação correta e parser tolerante =====
 async function listarTodosFornecedores() {
   const token = await getAccessToken();
   if (!token) return [];
 
   const todos = [];
-  let page = 1;
-  const limit = 50;
+  let pagina = 1;
+  const tamanhoPagina = 50;
 
   try {
-    while (page <= MAX_PAGINAS) {
-      const response = await axios.get(`${TINY_API_V3_BASE}/contatos?tipo=J&nome=FORNECEDOR&page=${page}&limit=${limit}`, {
-        headers: { Authorization: `Bearer ${token}` }
+    while (pagina <= MAX_PAGINAS) {
+      const resp = await axios.get(`${TINY_API_V3_BASE}/contatos`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { pagina, tamanhoPagina, tipo: 'J', nome: 'FORNECEDOR' } // padrão V3
       });
 
-      const contatosPagina = response.data.itens || [];
-      if (!contatosPagina.length) break;
+      const payload = resp.data || {};
+      const itens =
+        payload?.itens ||
+        payload?.data?.itens ||
+        payload?.data ||
+        payload?.contacts ||
+        [];
 
-      todos.push(...contatosPagina);
-      page++;
+      const lista = Array.isArray(itens) ? itens : [];
+      if (lista.length === 0) break;
+
+      todos.push(...lista);
+      pagina++;
+
       await delay(500);
     }
 
-    return Array.from(new Map(todos.map(f => [f.id, f])).values());
+    // dedup por id
+    return Array.from(new Map(todos.map(f => [String(f.id ?? f.codigo ?? f.idCadastro), f])).values());
   } catch (err) {
     console.error('❌ Erro ao buscar fornecedores:', err.message);
     return [];
@@ -103,14 +120,29 @@ router.post('/', async (req, res) => {
       return res.status(200).json({ mensagem: 'Nenhuma OC será gerada. Itens são de estoque.' });
     }
 
+    // ===== carrega fornecedores =====
     const fornecedores = await listarTodosFornecedores();
+
+    // 🚧 Guardrail: sem fornecedores → não chama IA nem tenta OC
+    if (!Array.isArray(fornecedores) || fornecedores.length === 0) {
+      try {
+        await validarRespostaOrdem(
+          { retorno: { mensagem: 'Lista de fornecedores vazia (V3)', detalhes: `PEDIDO ${numeroPedido}` } },
+          numeroPedido,
+          'N/D',
+          null
+        );
+      } catch {}
+      return res.status(200).json({ mensagem: `Pedido ${numeroPedido}: lista de fornecedores vazia. Ignorado.` });
+    }
+
     const itensEnriquecidos = [];
 
     for (const item of itensFiltrados) {
       try {
-        const produtoId = item.produto?.id;
-        const quantidade = item.quantidade || 1;
-        const valorUnitario = item.valorUnitario || item.valor_unitario || 0;
+        const produtoId = item?.produto?.id;
+        const quantidade = item?.quantidade ?? 1;
+        const valorUnitario = item?.valorUnitario ?? item?.valor_unitario ?? 0;
 
         if (!produtoId) continue;
 
@@ -118,7 +150,7 @@ router.post('/', async (req, res) => {
         if (!produto) continue;
 
         const sku = produto.sku || produto.codigo || 'DESCONHECIDO';
-        const marca = produto.marca?.nome?.trim();
+        const marca = produto?.marca?.nome?.trim();
         if (!marca) continue;
 
         itensEnriquecidos.push({ ...item, produto, sku, quantidade, valorUnitario, marca });
@@ -132,59 +164,13 @@ router.post('/', async (req, res) => {
 
     for (const [marca, itensDaMarca] of Object.entries(agrupadosPorMarca)) {
       const marcaNorm = normalizarTexto(marca);
-      let fornecedor = fornecedores.find(f => normalizarTexto(f.nome) === `fornecedor ${marcaNorm}`)
-        || fornecedores.find(f => normalizarTexto(f.nome).includes(marcaNorm));
+      const alvoExato = normalizarTexto(`FORNECEDOR ${marca}`);
 
-      // Fluxo de IA para escolher fornecedor (mantido)
-      if (!fornecedor) {
-        const respostaIA = await analisarPedidoViaIA({ marca, produtoSKU: itensDaMarca[0].sku, fornecedores });
-        if (respostaIA?.deveGerarOC && respostaIA.idFornecedor) {
-          fornecedor = fornecedores.find(f => f.id === respostaIA.idFornecedor);
-        }
-      }
+      let fornecedor =
+        fornecedores.find(f => normalizarTexto(f?.nome) === alvoExato) ||
+        fornecedores.find(f => {
+          const nome = normalizarTexto(f?.nome || '').replace(/^fornecedor/, '').trim();
+          return nome.includes(marcaNorm) || marcaNorm.includes(nome);
+        });
 
-      // ⚠️ Aqui ÚNICO caso onde WhatsApp pode ser disparado antes da OC:
-      if (!fornecedor) {
-        const skus = itensDaMarca.map(i => i.sku).join(', ');
-        await validarRespostaOrdem(
-          { retorno: { mensagem: 'Nenhum fornecedor identificado', detalhes: skus } },
-          numeroPedido,
-          marca,
-          null
-        );
-        continue;
-      }
-
-      const payloadOC = gerarPayloadOrdemCompra({
-        numeroPedido: pedido.numeroPedido,
-        nomeCliente: pedido.cliente?.nome || '',
-        dataPrevista: pedido.dataPrevista,
-        itens: itensDaMarca,
-        fornecedor
-      });
-
-      if (!payloadOC || !payloadOC.itens?.length) {
-        continue; // Simplesmente ignora payload inválido
-      }
-
-      try {
-        const resposta = await enviarOrdemCompra(payloadOC);
-        const sucesso = await validarRespostaOrdem(resposta, numeroPedido, marca, fornecedor);
-
-        resultados.push({ marca, fornecedor: fornecedor.nome, status: sucesso ? 'OK' : 'Falha' });
-      } catch (erroEnvio) {
-        // Se falhar mesmo assim, não dispara WhatsApp aqui!
-        console.error(`❌ Erro ao enviar OC da marca ${marca} no pedido ${numeroPedido}`, erroEnvio);
-      }
-    }
-
-    return res.status(200).json({ mensagem: 'OC(s) processada(s)', resultados });
-
-  } catch (err) {
-    // Erros genéricos: só log, sem WhatsApp
-    console.error('❌ Erro geral ao processar webhook:', err);
-    return res.status(500).json({ erro: 'Erro interno no processamento do webhook.' });
-  }
-});
-
-module.exports = router;
+      // Fluxo de IA para escolher fornecedor (
